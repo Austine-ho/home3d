@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111418">
+<title>我家 3D</title>
+<link rel="manifest" href="manifest.json">
+<style>
+:root{--bg:#111418;--card:rgba(20,24,30,.94);--fg:#f2f0ea;--mut:#a9b0ba;--acc:#e8743a;--line:rgba(255,255,255,.13);--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block}
+button{font:inherit;color:inherit;background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.16)} button.on{background:var(--acc);border-color:var(--acc);color:#fff} button.danger{color:#ff8a7a} button.go{background:var(--acc);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.4}
+input,select{font:inherit;color:var(--fg);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:7px;padding:6px 8px;width:100%}
+select option{color:#000}
+.mut{color:var(--mut)} .rowb{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.grp{font-size:12px;color:var(--mut);margin:10px 0 6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:6px} .grid button{font-size:13px;padding:8px 4px}
+.hide{display:none!important}
+/* menu */
+#menu{position:fixed;inset:0;display:none;background:radial-gradient(ellipse at top,rgba(40,50,70,.75),rgba(0,0,0,.85));z-index:40;overflow:auto;padding:calc(16px + var(--sat)) 16px calc(16px + var(--sab))}
+#menu.show{display:flex}
+#menu .wrap{max-width:760px;width:100%;margin:auto}
+#menu h1{margin:0;font-size:30px} #menu .sub{color:var(--mut);margin:4px 0 18px;font-size:14px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.cards button{padding:16px 10px;border-radius:14px;text-align:left;background:rgba(255,255,255,.07)}
+.cards button b{display:block;font-size:17px;margin-bottom:4px} .cards button small{color:var(--mut);font-size:12px;line-height:1.4;display:block}
+.cards button .em{font-size:28px;display:block;margin-bottom:6px}
+.cards.games button{background:linear-gradient(160deg,rgba(232,116,58,.25),rgba(255,255,255,.05))}
+.cards .prog{display:inline-block;margin-top:6px;font-size:11px;background:rgba(0,0,0,.35);padding:2px 8px;border-radius:10px;color:#ffd08a}
+.sect{font-size:13px;color:var(--mut);margin:14px 0 8px}
+.keys{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:5px 10px;font-size:12px;color:var(--mut);margin-top:12px}
+kbd{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 6px;color:var(--fg);font-family:inherit;white-space:nowrap}
+body.touch .keys{display:none}
+/* hud */
+#cross{position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.5);z-index:5;pointer-events:none;display:none}
+#hint{position:fixed;left:50%;top:calc(50% + 26px);transform:translateX(-50%);background:rgba(0,0,0,.6);padding:4px 10px;border-radius:6px;font-size:14px;display:none;z-index:5;pointer-events:none}
+#tag{position:fixed;left:12px;top:calc(10px + var(--sat));background:rgba(0,0,0,.55);padding:6px 12px;border-radius:8px;font-size:13px;z-index:6;pointer-events:none}
+#flname{position:fixed;left:50%;top:calc(10px + var(--sat));transform:translateX(-50%);background:rgba(0,0,0,.45);padding:3px 12px;border-radius:12px;font-size:13px;z-index:6;pointer-events:none;display:none}
+#topr{position:fixed;right:10px;top:calc(10px + var(--sat));display:none;gap:6px;z-index:12}
+#topr button{padding:6px 10px;font-size:13px;background:rgba(0,0,0,.5)}
+#floorbtns{display:none;gap:4px}
+#toast{position:fixed;left:50%;bottom:calc(40px + var(--sab));transform:translateX(-50%);background:rgba(0,0,0,.78);padding:10px 18px;border-radius:10px;font-size:15px;opacity:0;transition:opacity .3s;z-index:60;pointer-events:none;white-space:nowrap}
+body[data-mode=visit] #cross,body[data-mode=game] #cross{display:block}
+body[data-mode=visit] #flname,body[data-mode=game] #flname,body[data-mode=edit] #flname{display:block}
+body[data-mode=visit] #topr,body[data-mode=edit] #topr,body[data-mode=game] #topr{display:flex}
+body[data-mode=visit] #floorbtns{display:flex}
+body:not([data-mode=visit]) #btnNight{display:none}
+/* touch controls */
+#joy{position:fixed;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.3);display:none;z-index:8;pointer-events:none}
+#joyKnob{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.45)}
+#tbtns{position:fixed;right:14px;bottom:calc(14px + var(--sab));display:none;z-index:9;width:200px;height:200px}
+#tbtns button{position:absolute;border-radius:50%;background:rgba(0,0,0,.4);border:2px solid rgba(255,255,255,.35);font-size:22px;padding:0;touch-action:none}
+#tbtns button.on{background:rgba(232,116,58,.7)}
+#tbtns [data-act=attack]{width:92px;height:92px;right:0;bottom:0;font-size:36px}
+#tbtns [data-act=jump]{width:58px;height:58px;right:100px;bottom:0}
+#tbtns [data-act=use]{width:58px;height:58px;right:0;bottom:100px}
+#tbtns [data-act=switch]{width:52px;height:52px;right:96px;bottom:84px;font-size:18px}
+#tbtns [data-act=run]{width:52px;height:52px;right:150px;bottom:40px;font-size:18px}
+body.touch[data-mode=visit] #tbtns,body.touch[data-mode=game] #tbtns{display:block}
+body[data-mode=visit] #tbtns [data-act=attack],body[data-mode=visit] #tbtns [data-act=switch]{display:none}
+body[data-mode=visit] #tbtns [data-act=use]{right:0;bottom:0;width:72px;height:72px}
+body[data-mode=visit] #tbtns [data-act=jump]{right:84px;bottom:0}
+/* 3D edit panel */
+#panel{position:fixed;right:10px;top:calc(54px + var(--sat));bottom:calc(10px + var(--sab));width:290px;background:var(--card);border:1px solid var(--line);border-radius:14px;display:none;flex-direction:column;z-index:10;overflow:hidden}
+#panel.show{display:flex} #panel.mini{bottom:auto} #panel.mini .tab,#panel.mini .phelp{display:none}
+.tabs{display:flex;border-bottom:1px solid var(--line)} .tabs button{flex:1;border:0;border-radius:0;background:none;padding:11px 4px} .tabs button.on{background:rgba(232,116,58,.25);box-shadow:inset 0 -2px var(--acc);color:#fff}
+.tab{display:none;padding:10px;overflow:auto;flex:1} .tab.show{display:block}
+#selbox{background:rgba(255,255,255,.05);border-radius:10px;padding:10px;margin-bottom:6px}
+.colors{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px} .colors button{width:26px;height:26px;padding:0;border-radius:50%}
+.sw{display:grid;grid-template-columns:repeat(4,1fr);gap:6px} .sw button{height:52px;padding:0;position:relative;overflow:hidden;border-width:2px}
+.sw button span{position:absolute;left:0;right:0;bottom:0;font-size:10px;background:rgba(0,0,0,.55);padding:2px 0} .sw button.on{border-color:#fff;box-shadow:0 0 0 2px var(--acc)}
+.phelp{font-size:11px;color:var(--mut);line-height:1.6;border-top:1px solid var(--line);padding:8px 10px}
+body.touch .phelp{display:none}
+/* plan editor */
+#plan{position:fixed;inset:0;background:#161a1f;display:none;z-index:30}
+#plan.show{display:block}
+#ptop{position:absolute;left:0;right:0;top:0;padding:calc(8px + var(--sat)) 10px 8px;display:flex;gap:6px;align-items:center;background:rgba(20,24,30,.95);border-bottom:1px solid var(--line);z-index:2;overflow-x:auto}
+#ptop b{white-space:nowrap;margin-right:6px} #pfloors{display:flex;gap:4px} #ptop .sp{flex:1}
+#ptop button{white-space:nowrap;padding:6px 10px}
+#ptools{position:absolute;left:8px;top:calc(62px + var(--sat));display:flex;flex-direction:column;gap:5px;z-index:2}
+#ptools button{display:flex;flex-direction:column;align-items:center;font-size:11px;padding:6px 4px;width:64px;background:rgba(20,24,30,.92)}
+#ptools button span{font-size:20px} #ptools button.on{background:var(--acc)}
+#planCanvas{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none}
+#pprops{position:absolute;right:8px;top:calc(62px + var(--sat));width:280px;max-height:calc(100% - 80px - var(--sat));overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;z-index:2;display:none}
+#pprops.show{display:block}
+#pprops .ph{font-weight:700;font-size:16px;margin-bottom:8px} #pprops .ph small{font-weight:400;color:var(--mut);font-size:12px}
+#pprops .tip{font-size:12px;color:var(--mut);line-height:1.7}
+.pf{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px} .pf span{width:84px;color:var(--mut);flex:none}
+.sws{display:grid;grid-template-columns:repeat(8,1fr);gap:4px} .sws button{height:24px;padding:0;border-radius:5px} .sws button.on{outline:2px solid #fff;outline-offset:1px}
+#phint{position:absolute;left:50%;bottom:calc(12px + var(--sab));transform:translateX(-50%);background:rgba(0,0,0,.6);padding:5px 12px;border-radius:8px;font-size:12px;color:#ddd;z-index:2;pointer-events:none;white-space:nowrap}
+@media (max-width:760px){
+  .cards{grid-template-columns:1fr 1fr} .cards button{padding:12px 8px} .cards button .em{font-size:22px}
+  #panel{left:8px;right:8px;width:auto;top:auto;height:46%;bottom:calc(8px + var(--sab))}
+  #ptools{left:0;right:0;top:auto;bottom:calc(0px + var(--sab));flex-direction:row;overflow-x:auto;padding:6px;background:rgba(20,24,30,.95)}
+  #ptools button{flex:none;width:58px}
+  #pprops{left:6px;right:6px;width:auto;top:auto;bottom:calc(76px + var(--sab));max-height:46%}
+  #phint{bottom:calc(84px + var(--sab));font-size:11px}
+}
+/* game hud */
+#ghud{position:fixed;inset:0;pointer-events:none;z-index:7;display:none}
+#ghud.show{display:block}
+#gtop{position:absolute;left:12px;top:calc(46px + var(--sat));display:flex;flex-direction:column;gap:4px;font-weight:600}
+#gtop>div{background:rgba(0,0,0,.5);padding:4px 10px;border-radius:8px;font-size:14px;width:max-content}
+#gtop>div:empty{display:none} #gmoney{color:#ffd24a} #gextra{pointer-events:auto;display:flex;gap:6px} #gextra button{background:rgba(0,0,0,.55);font-size:13px}
+#hpbar{position:absolute;left:12px;bottom:calc(14px + var(--sab));width:220px;height:20px;background:rgba(0,0,0,.55);border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.25)}
+#hpfill{height:100%;background:linear-gradient(90deg,#e33,#f86);width:100%;transition:width .2s} #hptext{position:absolute;inset:0;text-align:center;font-size:12px;line-height:20px}
+body.touch #hpbar{left:50%;transform:translateX(-50%);bottom:calc(6px + var(--sab));width:160px}
+#wbar{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(42px + var(--sab));display:flex;gap:5px;pointer-events:auto}
+#wbar button{display:flex;flex-direction:column;align-items:center;font-size:22px;padding:4px 6px;min-width:52px;background:rgba(0,0,0,.5)} #wbar button small{font-size:10px}
+#wbar button.on{background:rgba(232,116,58,.8)}
+body.touch #wbar{left:10px;transform:none;bottom:auto;top:calc(150px + var(--sat));flex-direction:column}
+body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
+#bossbar{position:absolute;left:50%;top:calc(44px + var(--sat));transform:translateX(-50%);width:min(420px,70vw);display:none;text-align:center}
+#bossbar.show{display:block} #bossname{font-weight:700;color:#ff6a4a;text-shadow:0 0 6px #000}
+#bossbar .b{height:12px;background:rgba(0,0,0,.6);border-radius:6px;overflow:hidden;border:1px solid #a33} #bossfill{height:100%;background:linear-gradient(90deg,#a00,#f40);width:100%}
+#garrow{position:absolute;left:50%;top:calc(84px + var(--sat));transform:translateX(-50%);display:none;text-align:center}
+#garrow i{display:block;width:0;height:0;margin:0 auto;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:26px solid #ffd24a;filter:drop-shadow(0 0 3px #000)}
+#garrow span{font-size:12px;background:rgba(0,0,0,.5);padding:1px 6px;border-radius:6px}
+#flash{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;z-index:20}
+#vig{position:fixed;inset:0;pointer-events:none;z-index:6;display:none;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 35%,rgba(0,0,0,.85) 100%);transition:opacity .5s}
+#vig.show{display:block}
+#banner{position:fixed;left:50%;top:30%;transform:translate(-50%,-50%) scale(.9);text-align:center;z-index:25;pointer-events:none;opacity:0;transition:all .3s}
+#banner.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+#banner b{display:block;font-size:40px;text-shadow:0 3px 12px #000;white-space:nowrap} #banner span{font-size:17px;text-shadow:0 2px 6px #000}
+.ftext{position:fixed;transform:translate(-50%,-50%);color:#ffd24a;font-weight:700;font-size:18px;text-shadow:0 2px 4px #000;pointer-events:none;z-index:21;animation:fup .9s forwards}
+@keyframes fup{to{transform:translate(-50%,-160%);opacity:0}}
+#shop,#dialog{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:35;padding:16px}
+#shop.show,#dialog.show{display:flex}
+#shop .card,#dialog .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;width:min(560px,100%);max-height:90vh;overflow:auto}
+#shop h2,#dialog h2{margin:0 0 6px} .money{color:#ffd24a;font-weight:700;margin-bottom:10px}
+.items{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.item{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.05);padding:8px 10px;border-radius:10px} .item.cur{outline:2px solid var(--acc)}
+.item .ic{font-size:28px;width:38px;text-align:center} .item .info{flex:1} .item small{display:block;color:var(--mut);font-size:12px} .item .lv{color:#ffd24a;font-size:12px}
+.item button{white-space:nowrap;font-size:13px;padding:6px 10px}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:100;font-size:18px;color:var(--mut)}
+</style>
+<script src="textures.js"></script>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body data-mode="menu">
+<div id="loading">🏠 載入中…</div>
+
+<div id="menu">
+  <div class="wrap">
+    <h1>🏠 我家 3D</h1>
+    <p class="sub">依照錄影建立的三層樓透天厝：可以參觀、改裝潢、改格局，還有三款小遊戲</p>
+    <div class="cards">
+      <button data-go="visit"><span class="em">🚶</span><b>參觀</b><small>第一人稱逛 1F～3F，開門、開燈、日夜切換</small></button>
+      <button data-go="edit"><span class="em">🛋</span><b>改裝潢</b><small>在 3D 裡搬家具、換油漆、地板、壁紙</small></button>
+      <button data-go="plan"><span class="em">📐</span><b>空間編輯</b><small>平面圖改房間尺寸、畫牆、加門窗、新增樓層</small></button>
+    </div>
+    <div class="sect">🎮 遊戲（使用你目前設計的家）</div>
+    <div class="cards games">
+      <button data-go="game:clean"><span class="em">🪳</span><b>清潔大作戰</b><small>掃把、水槍、殺蟲劑消滅蟑螂蚊子老鼠，打倒蟑螂王</small><span class="prog" id="prog-clean"></span></button>
+      <button data-go="game:ghost"><span class="em">👻</span><b>驅鬼大師</b><small>艾草棒、聖水槍、符咒驅鬼，關卡越來越難，最後對決鬼王</small><span class="prog" id="prog-ghost"></span></button>
+      <button data-go="game:destroy"><span class="em">🔨</span><b>拆家狂人</b><small>鐵鎚、武士刀、手榴彈、大砲把整個家拆光，隨時可復原</small><span class="prog" id="prog-destroy"></span></button>
+    </div>
+    <div class="sect">⚙️ 設定</div>
+    <div class="rowb"><button id="btnExport">⬇ 匯出設計</button><button id="btnImport">⬆ 匯入設計</button><input type="file" id="fileIn" accept=".json" hidden><button id="btnShot">📷 截圖</button><button id="btnFull">⛶ 全螢幕</button><button id="btnReset" class="danger">↺ 還原原始格局</button></div>
+    <div class="keys">
+      <kbd>W A S D</kbd><span>移動</span><kbd>滑鼠</kbd><span>轉視角</span>
+      <kbd>Shift</kbd><span>跑步</span><kbd>空白鍵</kbd><span>跳</span>
+      <kbd>E</kbd><span>開門 / 開關燈</span><kbd>L</kbd><span>日夜切換</span>
+      <kbd>左鍵</kbd><span>攻擊（遊戲）</span><kbd>Q / 1-9</kbd><span>換武器</span>
+      <kbd>Tab</kbd><span>參觀 ⇄ 改裝潢</span><kbd>Esc</kbd><span>暫停 / 選單</span>
+    </div>
+  </div>
+</div>
+
+<div id="cross"></div>
+<div id="hint"></div>
+<div id="tag"></div>
+<div id="flname"></div>
+<div id="topr"><div id="floorbtns"></div><button id="btnNight">🌓</button><button id="pauseBtn">☰ 選單</button></div>
+<div id="toast"></div>
+<div id="joy"><div id="joyKnob"></div></div>
+<div id="tbtns">
+  <button data-act="attack">🧹</button><button data-act="jump">⤒</button><button data-act="use">✋</button><button data-act="switch">🔄</button><button data-act="run">🏃</button>
+</div>
+
+<div id="panel">
+  <div class="tabs"><button data-tab="furn" class="on">家具</button><button data-tab="paint">油漆/地板</button><button id="collapse" style="flex:0 0 44px">⇕</button></div>
+  <div class="tab show" id="tab-furn"><div id="selbox"></div><div id="catalog"></div></div>
+  <div class="tab" id="tab-paint">
+    <div class="mut" style="font-size:12px">選一種材質，再點牆面或地板。每面牆兩側分開計算。</div>
+    <div class="grp">油漆</div><div class="sw" id="swPaint"></div>
+    <div class="grp">磁磚 / 地板 / 壁紙</div><div class="sw" id="swTex"></div>
+  </div>
+  <div class="phelp">左鍵選取/拖曳家具　右鍵拖曳轉視角　R 旋轉　T 轉90°　[ ] 升降　Del 刪除　⌘D 複製</div>
+  <div style="padding:8px;border-top:1px solid var(--line)"><button id="pDone2" style="width:100%">🚶 完成，回到參觀</button></div>
+</div>
+
+<div id="plan">
+  <div id="ptop"><button data-go="visit" class="go">✓ 完成</button><b>📐</b><div id="pfloors"></div><span class="sp"></span><button id="pUndo">↶</button><button id="pRedo">↷</button><button id="pFit">⤢</button><button id="pSnap">格線</button></div>
+  <canvas id="planCanvas"></canvas>
+  <div id="ptools"></div>
+  <div id="pprops"></div>
+  <div id="phint"></div>
+</div>
+
+<div id="ghud">
+  <div id="gtop"><div id="glevel"></div><div id="gleft"></div><div id="gmoney"></div><div id="gextra"></div></div>
+  <div id="bossbar"><div id="bossname"></div><div class="b"><div id="bossfill"></div></div></div>
+  <div id="garrow"><i></i><span></span></div>
+  <div id="hpbar"><div id="hpfill"></div><div id="hptext"></div></div>
+  <div id="wbar"></div>
+</div>
+<div id="vig"></div>
+<div id="flash"></div>
+<div id="banner"></div>
+<div id="shop"></div>
+<div id="dialog"></div>
+
+<script type="module">
+import './js/main.js';
+document.getElementById('loading').remove();
+</script>
+<script>
+window.addEventListener('error', e => { const l = document.getElementById('loading'); if (l) l.textContent = '載入失敗：' + e.message; });
+</script>
+</body>
+</html>

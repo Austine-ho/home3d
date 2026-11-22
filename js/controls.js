@@ -1,0 +1,128 @@
+// player movement + keyboard / mouse / touch input
+import { THREE, S, camera, renderer, isTouch, $, clamp, toast } from './core.js';
+import { hits, groundAt } from './house.js';
+
+export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 2.4, run: 4.4, eye: 1.58, bob: 0 };
+export const input = { keys: {}, jx: 0, jy: 0, look: true, attack: false };
+export const on = { interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
+export const fx = { shake: 0, kick: 0 };
+
+const cvs = renderer.domElement;
+export const locked = () => document.pointerLockElement === cvs;
+let wantLock = false, wasLocked = false;
+export function requestLock() {
+  if (isTouch) return; wantLock = true;
+  try { const p = cvs.requestPointerLock(); if (p && p.catch) p.catch(() => { }); } catch (e) { }
+}
+export function releaseLock() { wantLock = false; if (locked()) document.exitPointerLock(); }
+document.addEventListener('pointerlockchange', () => {
+  if (locked()) wasLocked = true;
+  else if (wasLocked && wantLock) { wantLock = false; on.escape && on.escape(); }
+  if (!locked()) wasLocked = false;
+});
+
+// keyboard
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  input.keys[e.code] = true;
+  if (e.code === 'Tab') e.preventDefault();
+  on.key && on.key(e);
+});
+addEventListener('keyup', e => { input.keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in input.keys) input.keys[k] = false; input.attack = false; });
+
+// mouse
+let drag = null;
+cvs.addEventListener('mousedown', e => {
+  if (!input.look || isTouch) return;
+  if (S.mode === 'visit' || S.mode === 'game') {
+    if (!locked()) { requestLock(); drag = { x: e.clientX, y: e.clientY }; }
+    if (e.button === 0 && S.mode === 'game') { input.attack = true; on.attackDown && on.attackDown(); }
+  }
+});
+addEventListener('mouseup', e => { drag = null; if (e.button === 0 && input.attack) { input.attack = false; on.attackUp && on.attackUp(); } });
+document.addEventListener('mousemove', e => {
+  if (!input.look) return;
+  if (locked()) look(e.movementX * 2.2, e.movementY * 2.2);
+  else if (drag) { look((e.clientX - drag.x) * 4, (e.clientY - drag.y) * 4); drag = { x: e.clientX, y: e.clientY }; }
+});
+export function look(dx, dy) { player.yaw -= dx * 0.001; player.pitch = clamp(player.pitch - dy * 0.001, -1.45, 1.45); }
+
+// touch: left half = joystick, right half = look
+const joy = $('#joy'), knob = $('#joyKnob');
+let jt = null, lt = null;
+cvs.addEventListener('touchstart', e => {
+  for (const t of e.changedTouches) {
+    if (t.clientX < innerWidth * 0.42 && jt === null && input.look && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit')) {
+      jt = { id: t.identifier, x: t.clientX, y: t.clientY }; joy.style.left = (t.clientX - 60) + 'px'; joy.style.top = (t.clientY - 60) + 'px'; joy.style.display = 'block'; knob.style.transform = 'translate(0,0)';
+    } else if (lt === null && input.look) lt = { id: t.identifier, x: t.clientX, y: t.clientY };
+  }
+}, { passive: true });
+cvs.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (jt && t.identifier === jt.id) {
+      let dx = t.clientX - jt.x, dy = t.clientY - jt.y; const l = Math.hypot(dx, dy), mx = 50;
+      if (l > mx) { dx *= mx / l; dy *= mx / l; }
+      input.jx = dx / mx; input.jy = -dy / mx; knob.style.transform = `translate(${dx}px,${dy}px)`;
+    } else if (lt && t.identifier === lt.id) { look((t.clientX - lt.x) * 5, (t.clientY - lt.y) * 5); lt.x = t.clientX; lt.y = t.clientY; }
+  }
+}, { passive: true });
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    if (jt && t.identifier === jt.id) { jt = null; input.jx = input.jy = 0; joy.style.display = 'none'; }
+    if (lt && t.identifier === lt.id) lt = null;
+  }
+}
+cvs.addEventListener('touchend', endTouch); cvs.addEventListener('touchcancel', endTouch);
+
+// on-screen buttons
+document.querySelectorAll('#tbtns [data-act]').forEach(b => {
+  const act = b.dataset.act;
+  b.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation(); b.classList.add('on');
+    if (act === 'attack') { input.attack = true; on.attackDown && on.attackDown(); }
+    if (act === 'jump') input.keys.Space = true;
+    if (act === 'run') input.keys.ShiftLeft = !input.keys.ShiftLeft;
+    if (act === 'use') on.interact && on.interact();
+    if (act === 'switch') on.switchW && on.switchW();
+  }, { passive: false });
+  b.addEventListener('touchend', e => {
+    e.preventDefault(); b.classList.remove('on');
+    if (act === 'attack') { input.attack = false; on.attackUp && on.attackUp(); }
+    if (act === 'jump') input.keys.Space = false;
+    if (act === 'run' && !input.keys.ShiftLeft) b.classList.remove('on'); else if (act === 'run') b.classList.add('on');
+  }, { passive: false });
+});
+
+// ---------- movement ----------
+export function updatePlayer(dt, t, canMove) {
+  const k = input.keys;
+  let fx_ = 0, fz = 0;
+  if (canMove) {
+    if (k.KeyW || k.ArrowUp) fz += 1; if (k.KeyS || k.ArrowDown) fz -= 1;
+    if (k.KeyD || k.ArrowRight) fx_ += 1; if (k.KeyA || k.ArrowLeft) fx_ -= 1;
+    fx_ += input.jx; fz += input.jy;
+  }
+  const len = Math.hypot(fx_, fz);
+  if (len > .05) {
+    const n = len > 1 ? len : 1, run = k.ShiftLeft || k.ShiftRight;
+    const spd = (run ? player.run : player.speed) * dt / n;
+    const sy = Math.sin(player.yaw), cyw = Math.cos(player.yaw);
+    const dx = (-sy * fz + cyw * fx_) * spd, dz = (-cyw * fz - sy * fx_) * spd;
+    const p = player.pos, stuck = hits(p.x, p.z, p.y);
+    if (stuck || !hits(p.x + dx, p.z, p.y)) p.x += dx;
+    if (stuck || !hits(p.x, p.z + dz, p.y)) p.z += dz;
+    player.bob += dt * (run ? 14 : 10);
+  }
+  if (canMove && k.Space && player.ground) { player.vy = 4.2; player.ground = false; }
+  const g = groundAt(player.pos.x, player.pos.z, player.pos.y);
+  player.vy -= 12 * dt; player.pos.y += player.vy * dt;
+  if (player.pos.y <= g) { player.pos.y = g; player.vy = 0; player.ground = true; } else if (player.pos.y - g > .05) player.ground = false;
+  if (player.pos.y < -20) { player.pos.set(2.9, 0, 2.4); player.vy = 0; toast('掉出去了，回到大門口'); }
+  fx.shake = Math.max(0, fx.shake - dt * 2.5);
+  const sh = fx.shake * fx.shake * .15;
+  const bob = len > .05 && player.ground ? Math.sin(player.bob) * .025 : 0;
+  camera.position.set(player.pos.x + (Math.random() - .5) * sh, player.pos.y + player.eye + bob + (Math.random() - .5) * sh, player.pos.z + (Math.random() - .5) * sh);
+  camera.rotation.set(player.pitch + fx.kick, player.yaw, (Math.random() - .5) * sh * .3);
+  fx.kick *= Math.pow(.001, dt);
+}
