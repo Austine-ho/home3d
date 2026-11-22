@@ -1,6 +1,6 @@
 // three games: 清潔大作戰 (pests), 驅鬼大師 (ghosts), 拆家狂人 (destruction)
 import { THREE, S, $, scene, camera, M, bx, cy, sp, toast, clamp, DEG, isTouch, shade } from './core.js';
-import { H, hits, groundAt, floorOf, FH, damageAt, lightCfg, setNight, hemi, amb, setLamp, floorY, build, destructionProgress, killBlock } from './house.js';
+import { H, hits, groundAt, floorOf, FH, damageAt, lightCfg, setNight, hemi, amb, setLamp, floorY, build, destructionProgress, killBlock, entFi, allFl } from './house.js';
 import { player, input, fx, on } from './controls.js';
 
 // ================= audio (synthesised) =================
@@ -73,6 +73,7 @@ H.onBreak = (pos, color, size, kind, s) => {
 
 // ================= weapons =================
 export const WEAPONS = {
+  stick: { g: 'adv', n: '木棍', icon: '🪵', kind: 'melee', dmg: 30, range: 2.1, rate: .4, price: 0 },
   broom: { g: 'clean', n: '掃把', icon: '🧹', kind: 'melee', dmg: 34, range: 2.1, rate: .42, price: 0 },
   slipper: { g: 'clean', n: '藍白拖', icon: '🩴', kind: 'proj', dmg: 48, speed: 16, grav: 5, rate: .5, price: 120, model: 'slipper' },
   watergun: { g: 'clean', n: '水槍', icon: '🔫', kind: 'stream', dmg: 8, speed: 15, rate: .06, price: 260, color: '#5ab4ff' },
@@ -101,6 +102,7 @@ function buildVM(id) {
   vm.clear(); const g = new THREE.Group(); vm.add(g);
   const wood = M('#8a5a2a'), metal = M('#9aa0a6', { m: .8, r: .3 }), dark = M('#2a2a2a', { m: .5, r: .4 });
   switch (id) {
+    case 'stick': { const s = cy(g, .025, .03, .8, 0, -.3, 0, M('#7a5230', { r: .9 })); s.rotation.x = -.3; } break;
     case 'broom': cy(g, .015, .015, .9, 0, -.2, 0, wood).rotation.x = -.3; { const b = cy(g, .02, .12, .25, 0, -.45, .12, M('#d9b66a')); b.rotation.x = -.3; } break;
     case 'slipper': bx(g, .1, .03, .26, 0, 0, 0, M('#3d6fd6')); bx(g, .1, .02, .04, 0, .03, -.02, M('#fff')); break;
     case 'watergun': case 'holywater': bx(g, .08, .12, .3, 0, 0, 0, M(id === 'watergun' ? '#ff7a1a' : '#e9f6ff', { r: .3 })); cy(g, .05, .05, .12, 0, .12, .05, M(id === 'watergun' ? '#3aa0ff' : '#9fe8ff', { op: .7 })); bx(g, .05, .14, .06, 0, -.12, .08, dark); break;
@@ -117,7 +119,7 @@ function buildVM(id) {
     case 'cannon': cy(g, .09, .11, .55, 0, -.1, -.1, dark, 12).rotation.x = Math.PI / 2; break;
     case 'rocket': cy(g, .07, .07, .7, 0, 0, -.1, M('#4a5a3a'), 12).rotation.x = Math.PI / 2; bx(g, .04, .1, .06, 0, -.12, .05, dark); break;
   }
-  const bx0 = { broom: -.7, mugwort: -.6, hammer: -.3, chainsaw: 0 }[id] ?? .1;
+  const bx0 = { broom: -.7, mugwort: -.6, hammer: -.3, chainsaw: 0, stick: -.5 }[id] ?? .1;
   g.rotation.set(bx0, -.15, 0); g.userData.bx = bx0;
   vm.userData.g = g;
 }
@@ -144,8 +146,25 @@ const ENEMY = {
   wisp: { n: '小鬼', hp: 40, spd: 1.9, dmg: 5, r: .35, fly: 1.3, ghost: 1, money: 15, build: wisp },
   lady: { n: '紅衣女鬼', hp: 120, spd: 1.5, dmg: 11, r: .4, fly: .05, ghost: 1, teleport: 1, money: 35, build: lady },
   jiangshi: { n: '殭屍', hp: 170, spd: 1.5, dmg: 13, r: .4, hop: 1, money: 40, build: jiangshi },
+  smiler: { n: '後室笑臉', hp: 150, spd: 2.1, dmg: 14, r: .35, money: 45, build: smiler },
+  hound: { n: '黑影獵犬', hp: 90, spd: 3.3, dmg: 9, r: .4, money: 30, build: hound },
   ghostKing: { n: '鬼王', hp: 2600, spd: 1.4, dmg: 26, r: 1.1, fly: .2, ghost: 1, boss: 1, summon: 'wisp', fireball: 1, money: 1200, build: ghostKing },
 };
+function smiler() {
+  const root = new THREE.Group(), g = new THREE.Group(), dark = M('#050505', { r: 1 }); g.scale.setScalar(.62); root.add(g);
+  const b = sp(g, .55, 0, 1.25, 0, dark); b.scale.set(.9, 1.3, .8);
+  for (const sd of [-1, 1]) sp(g, .07, sd * .17, 1.55, .4, M('#ffffff', { e: '#ffffff', ei: 2 }));
+  for (let i = 0; i < 9; i++) { const a = (i / 8 - .5) * 2.2; bx(g, .06, .07, .03, Math.sin(a) * .28, 1.18 - Math.cos(a) * .1, .42, M('#ffffff', { e: '#ffffff', ei: 1.6 })); }
+  for (const sd of [-1, 1]) { const a = bx(g, .08, .9, .08, sd * .5, .35, .05, dark); a.rotation.z = sd * .15; }
+  return root;
+}
+function hound() {
+  const g = new THREE.Group(), m = M('#111114', { r: .9 });
+  const b = sp(g, .3, 0, .55, 0, m); b.scale.set(.8, .7, 1.6); sp(g, .2, 0, .72, .48, m);
+  for (const sd of [-1, 1]) sp(g, .04, sd * .08, .78, .64, M('#ff2a1a', { e: '#ff2a1a', ei: 2 }));
+  const legs = new THREE.Group(); g.add(legs); for (const [x, z] of [[-.15, .3], [.15, .3], [-.15, -.3], [.15, -.3]]) bx(legs, .07, .45, .07, x, 0, z, m);
+  g.userData.legs = legs; return g;
+}
 function bug(c, s) {
   const g = new THREE.Group(), m = M(c, { r: .3, m: .2 });
   const b = sp(g, .2 * s, 0, .1 * s, 0, m); b.scale.set(.7, .35, 1.2);
@@ -209,7 +228,7 @@ function ghostKing() {
 const G = { kind: null, active: false, paused: false, level: 1, enemies: [], projs: [], cool: 0, hp: 100, maxHp: 100, queue: 0, spawnT: 0, prof: null, t: 0, boss: null, collapse: 0, scareT: 0 };
 export const Game = G;
 const PROF_KEY = k => 'home_game_' + k;
-const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer' };
+const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer', adventure: 'stick' };
 function loadProf(kind) {
   let p; try { p = JSON.parse(localStorage.getItem(PROF_KEY(kind))); } catch (e) { }
   if (!p) p = { money: kind === 'destroy' ? 200 : 0, owned: { [DEF_W[kind]]: 0 }, cur: DEF_W[kind], level: 1, hpLv: 0, spdLv: 0, defLv: 0, regLv: 0, potions: 2, best: 0 };
@@ -248,7 +267,7 @@ function updateHearts(dt) {
 }
 const saveProf = () => { try { localStorage.setItem(PROF_KEY(G.kind), JSON.stringify(G.prof)); } catch (e) { } };
 const W = () => WEAPONS[G.prof.cur];
-const curDmg = () => W().dmg * lvMult(G.prof.owned[G.prof.cur] || 0);
+const curDmg = () => W().dmg * lvMult(G.prof.owned[G.prof.cur] || 0) * (G.buffs?.power > 0 ? 2 : 1);
 
 let flashlight = null, worldTargets = [];
 export function startGame(kind, data) {
@@ -259,22 +278,25 @@ export function startGame(kind, data) {
   worldTargets = kind === 'destroy' ? null : [...H.wallMeshes, ...H.slabMeshes];
   const pf = G.prof; pf.defLv ??= 0; pf.regLv ??= 0; pf.potions ??= 2;
   G.maxHp = maxHpOf(pf); G.hp = G.maxHp; clearHearts(); player.speed = 2.4 * (1 + G.prof.spdLv * .08); player.run = 4.4 * (1 + G.prof.spdLv * .08);
+  G.buffs = { speed: 0, power: 0, shield: 0 }; G.session = (G.session || 0) + 1;
   vm.visible = true; buildVM(G.prof.cur);
   $('#ghud').classList.add('show'); $('#ghud').dataset.kind = kind; document.body.dataset.kind = kind;
   if (kind === 'ghost') {
     setNight(true); lightCfg.intensity = 3; lightCfg.flicker = .03; H.lamps.forEach(l => setLamp(l, Math.random() < .5));
     scene.fog = new THREE.FogExp2('#000000', .09);
     if (!flashlight) { flashlight = new THREE.SpotLight('#fff6d8', 0, 18, .45, .5, 1.2); camera.add(flashlight); camera.add(flashlight.target); flashlight.position.set(.2, -.1, 0); flashlight.target.position.set(0, 0, -5); }
-    flashlight.intensity = 25; $('#vig').classList.add('show'); Snd.droneOn();
+    flashlight.intensity = 25; $('#vig').classList.add('show'); Snd.droneOn(); lightCfg.lockFog = true;
   } else { setNight(false); lightCfg.intensity = 8; lightCfg.flicker = 0; scene.fog = null; }
   renderWeaponBar();
   if (kind === 'destroy') { banner('🔨 拆家狂人', '盡情破壞！賺錢買更強的武器，把整個家拆光', 2600); updateHUD(); }
+  else if (kind === 'adventure') { startAdventure(); }
   else startLevel(G.prof.level);
 }
 export function stopGame(silent) {
   if (!G.active) return;
   G.active = false; clearHearts(); for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
   vm.visible = false; beam.visible = false; $('#ghud').classList.remove('show'); $('#shop').classList.remove('show'); $('#banner').classList.remove('show'); $('#vig').classList.remove('show');
+  clearAdventure(); lightCfg.lockFog = false; $('#gextra').innerHTML = '';
   if (flashlight) flashlight.intensity = 0; scene.fog = null; lightCfg.flicker = 0; lightCfg.intensity = 8; Snd.droneOff(); setNight(false);
   H.lamps.forEach(l => setLamp(l, true));
   if (G.kind) saveProf();
@@ -328,6 +350,7 @@ function levelClear() {
 function playerDie() {
   G.paused = true; Snd.hurt(); vibrate([200, 100, 300]);
   $('#shop').classList.remove('show');
+  if (G.kind === 'adventure') return showDialog('💀 你倒下了', '金錢和武器都保留，回到大門口重新出發。', [['🔁 復活', () => { G.paused = false; G.hp = G.maxHp; player.pos.set(2.9, 0, 2.4); player.vy = 0; updateHUD(); }], ['🛒 商店', () => { G.hp = G.maxHp; player.pos.set(2.9, 0, 2.4); openShop(false); }], ['🏠 回主選單', () => on.escape && on.escape('menu')]]);
   showDialog('💀 你倒下了', `撐到第 ${G.level} 關。金錢和武器都保留。`, [['🔁 重新挑戰', () => { G.paused = false; startLevel(G.level); }], ['🛒 先去商店', () => openShop(false, true)], ['🏠 回主選單', () => on.escape && on.escape('menu')]]);
 }
 
@@ -396,7 +419,7 @@ function tryFire() {
 function destroyTargets() { return [...H.blockMeshes, ...H.furn.map(e => e.obj), ...H.doors.filter(d => !d.dead && d.leaf).map(d => d.leaf), ...H.breakables.filter(b => b.kind === 'window').map(b => b.obj), ...H.slabMeshes]; }
 function earn(m) { if (!m) return; G.prof.money += m; if (Math.random() < .3) Snd.coin(); updateHUD(); }
 function hurtEnemy(e, dmg, dir, quiet) {
-  if (e.dead) return; e.hp -= dmg; e.flash = .12;
+  if (e.dead) return; e.hp -= dmg; e.flash = .12; e.aggro = true;
   if (dir && !e.d.boss) e.mesh.position.addScaledVector(dir.clone().setY(0).normalize(), quiet ? .01 : .25);
   if (!quiet) burst(e.mesh.position.clone().add(new THREE.Vector3(0, .3, 0)), e.d.ghost ? '#cfe8ff' : '#7a5a2a', 4, 3, .06, .5);
   if (e.hp <= 0) killEnemy(e);
@@ -409,6 +432,7 @@ function killEnemy(e) {
   const m = Math.round(e.d.money * (1 + .1 * (G.level - 1))); earn(m); floatText(`+$${m}`, pos);
   if (e.d.boss) for (let i = 0; i < 3; i++) dropHeart(pos.clone().add(new THREE.Vector3((Math.random() - .5) * 2, 0, (Math.random() - .5) * 2)));
   else if (Math.random() < .14) dropHeart(pos);
+  if (e.adv) { const ses = G.session, m0 = e.adv; if (e === G.boss) { G.boss = null; $('#bossbar').classList.remove('show'); } if (m0.respawn > 0) setTimeout(() => { if (G.active && G.session === ses) spawnAdv(m0); }, m0.respawn * 1000); return; }
   if (e === G.boss) { G.boss = null; $('#bossbar').classList.remove('show'); fx.shake = 1.2; Snd.boom(1.5); for (const x of G.enemies.slice()) killEnemy(x); G.queue = 0; }
   if (!G.enemies.length && (G.kind === 'clean' || G.queue <= 0)) setTimeout(() => { if (G.active && !G.enemies.length && (G.kind === 'clean' || G.queue <= 0)) levelClear(); }, 600);
 }
@@ -458,8 +482,15 @@ function updateEnemies(dt) {
     const m = e.mesh, d = e.d;
     const dx = pp.x - m.position.x, dz = pp.z - m.position.z, distH = Math.hypot(dx, dz), dy = pp.y - e.base;
     const sameFloor = Math.abs(dy) < 1.4;
-    let mvx = 0, mvz = 0;
-    if (d.ghost) {
+    let mvx = 0, mvz = 0, advChase = true;
+    if (e.adv) { const rg = e.adv.range || 10; advChase = sameFloor && (e.adv.mode === 'active' ? distH < rg : e.aggro && distH < rg * 2.5); if (!advChase && e.aggro && distH > rg * 2.5) e.aggro = false; }
+    if (!advChase) {
+      e.wt -= dt; if (e.wt <= 0) { e.dir = Math.random() * 6.28; e.wt = 1.5 + Math.random() * 2.5; }
+      const hx = e.home.x - m.position.x, hz = e.home.z - m.position.z; if (Math.hypot(hx, hz) > 4) e.dir = Math.atan2(hx, hz);
+      mvx = Math.sin(e.dir) * .4; mvz = Math.cos(e.dir) * .4;
+      if (d.ghost) { m.position.y = e.base + (d.fly ?? 0) + Math.sin(e.t * 2.5) * .12; const mats = m.userData.mats; if (mats) for (const mt of mats) mt.opacity = .7; }
+      if (m.userData.legs) m.userData.legs.rotation.y = Math.sin(e.t * 15) * .2;
+    } else if (d.ghost) {
       e.vis = Math.min(1, e.vis + dt * 1.5);
       const ty = pp.y + (d.fly ?? 1.2) + Math.sin(e.t * 2) * .15;
       e.base += clamp(pp.y - e.base, -dt * 1.5, dt * 1.5); m.position.y = e.base + (d.fly ?? 0) + Math.sin(e.t * 2.5) * .12;
@@ -498,9 +529,9 @@ function updateEnemies(dt) {
     if (e.flash > 0) { e.flash -= dt; m.scale.setScalar(1 + e.flash); } else m.scale.setScalar(1);
     // attack player
     const reach = e.r + .55, d3 = Math.hypot(distH, (m.position.y - (pp.y + 1)) * (d.fly && !d.ghost ? 1 : .3));
-    if (d3 < reach + (d.boss ? .6 : 0) && e.cool <= 0 && (sameFloor || d.ghost)) { e.cool = d.boss ? 1.2 : 1.3; hurtPlayer(e.dmg); }
+    if (advChase && d3 < reach + (d.boss ? .6 : 0) && e.cool <= 0 && (sameFloor || d.ghost)) { e.cool = d.boss ? 1.2 : 1.3; hurtPlayer(e.dmg); }
     // jump scare when a ghost comes close in view
-    if (d.ghost && !e.scared && distH < 3.2) { e.scared = true; const v = camFwd(), to = new THREE.Vector3(dx, 0, dz).normalize().negate(); if (v.x * to.x + v.z * to.z > .3) scare(0); }
+    if (advChase && d.ghost && !e.scared && distH < 3.2) { e.scared = true; const v = camFwd(), to = new THREE.Vector3(dx, 0, dz).normalize().negate(); if (v.x * to.x + v.z * to.z > .3) scare(0); }
   }
 }
 function fireball(e) {
@@ -519,6 +550,7 @@ function updateEnemyShots() {
 }
 function hurtPlayer(n) {
   if (G.paused) return;
+  if (G.buffs?.shield > 0) { Snd.tone(1200, .08, 'triangle', .1); return; }
   G.hp -= n * (1 - .08 * (G.prof.defLv || 0)); Snd.hurt(); fx.shake = Math.max(fx.shake, .5); vibrate(60);
   const f = $('#flash'); f.style.background = 'rgba(200,0,0,.45)'; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 150);
   if (G.hp <= 0) { G.hp = 0; playerDie(); }
@@ -565,6 +597,12 @@ function updateHUD() {
     const p = destructionProgress(); $('#glevel').textContent = `破壞度 ${Math.floor(p * 100)}%`; $('#gleft').textContent = '';
     $('#hpbar').style.display = 'none'; $('#gextra').innerHTML = '<button id="gRestore">♻️ 復原</button><button id="gShop">🛒 商店</button>';
     $('#gRestore').onclick = () => restoreHouse(); $('#gShop').onclick = () => openShop(false);
+  } else if (G.kind === 'adventure') {
+    $('#hpbar').style.display = 'block'; $('#hpfill').style.width = (G.hp / G.maxHp * 100) + '%'; $('#hptext').textContent = `${Math.ceil(G.hp)} / ${G.maxHp}`; $('#potions').textContent = `🧪 ×${G.prof.potions}`;
+    const b = G.buffs, fi = floorOf(player.pos.y), near = G.enemies.filter(e => floorOf(e.base) === fi).length;
+    $('#glevel').textContent = '🗝 探險 · ' + (allFl()[fi]?.name || '');
+    $('#gleft').textContent = `👾 ${near}　🎁 ${chests.filter(c => !c.open && c.fi === fi).length}` + (b.speed > 0 ? `　👟${Math.ceil(b.speed)}s` : '') + (b.power > 0 ? `　💪${Math.ceil(b.power)}s` : '') + (b.shield > 0 ? `　🛡️${Math.ceil(b.shield)}s` : '');
+    if (!$('#gShop')) { $('#gextra').innerHTML = '<button id="gShop">🛒 商店</button>'; $('#gShop').onclick = () => openShop(false); }
   } else {
     $('#hpbar').style.display = 'block'; $('#hpfill').style.width = (G.hp / G.maxHp * 100) + '%'; $('#hptext').textContent = `${Math.ceil(G.hp)} / ${G.maxHp}`; $('#potions').textContent = `🧪 ×${G.prof.potions}`;
     $('#glevel').textContent = `第 ${G.level} 關`;
@@ -582,8 +620,8 @@ function renderWeaponBar() {
 }
 export function openShop(betweenLevels, fromDeath) {
   G.paused = true; holding = false; beam.visible = false;
-  const p = G.prof, list = Object.entries(WEAPONS).filter(([, w]) => w.g === G.kind);
-  let h = `<h2>🛒 ${G.kind === 'clean' ? '清潔用品店' : G.kind === 'ghost' ? '廟口法器店' : '五金武器行'}</h2><div class="money">💰 $${p.money}</div><div class="items">`;
+  const p = G.prof, list = Object.entries(WEAPONS).filter(([id, w]) => G.kind === 'adventure' ? (w.g !== 'destroy' || ['katana', 'grenade', 'cannon', 'rocket'].includes(id)) : w.g === G.kind);
+  let h = `<h2>🛒 ${G.kind === 'clean' ? '清潔用品店' : G.kind === 'ghost' ? '廟口法器店' : G.kind === 'adventure' ? '冒險者商店' : '五金武器行'}</h2><div class="money">💰 $${p.money}</div><div class="items">`;
   for (const [id, w] of list) {
     const own = id in p.owned, lv = p.owned[id] || 0;
     h += `<div class="item ${p.cur === id ? 'cur' : ''}"><div class="ic">${w.icon}</div><div class="info"><b>${w.n}</b>${own ? ` <span class="lv">Lv${lv + 1}</span>` : ''}<small>傷害 ${Math.round(w.dmg * lvMult(lv))}${w.radius ? ' · 爆炸範圍 ' + w.radius + 'm' : ''} · ${{ melee: '近戰', proj: '投擲/發射', stream: '連射', cone: '噴灑', beam: '光束', nova: '範圍' }[w.kind]}</small></div>
@@ -642,6 +680,7 @@ export function updateGame(dt) {
   if (G.kind !== 'destroy' && G.hp < G.maxHp && !G.enemies.some(e => e.mesh.position.distanceTo(player.pos) < 5)) G.hp = Math.min(G.maxHp, G.hp + dt * (2 + G.prof.regLv * 2.5));
   if (G.kind !== 'destroy' && G.prof.regLv && G.hp < G.maxHp) G.hp = Math.min(G.maxHp, G.hp + dt * G.prof.regLv * .6);
   updateHearts(dt);
+  if (G.kind === 'adventure') updateAdventure(dt);
   // ghost spawner
   if (G.kind === 'ghost') {
     G.spawnT -= dt;
@@ -665,11 +704,87 @@ export function updateGame(dt) {
   if (G.boss) $('#bossfill').style.width = (G.boss.hp / G.boss.max * 100) + '%';
   // nearest enemy arrow
   const arrow = $('#garrow');
-  if (G.kind !== 'destroy' && G.enemies.length) {
+  if (G.kind !== 'destroy' && G.kind !== 'adventure' && G.enemies.length) {
     let best = null, bd = 1e9; for (const e of G.enemies) { const d = e.mesh.position.distanceTo(player.pos) + Math.abs(e.base - player.pos.y) * 3; if (d < bd) { bd = d; best = e; } }
     const dx = best.mesh.position.x - player.pos.x, dz = best.mesh.position.z - player.pos.z, ang = Math.atan2(dx, -dz) + player.yaw;
     const fd = floorOf(best.base) - floorOf(player.pos.y);
     arrow.style.display = 'block'; arrow.querySelector('i').style.transform = `rotate(${ang}rad)`; arrow.querySelector('span').textContent = `${Math.round(Math.hypot(dx, dz))}m${fd > 0 ? ' ⬆樓上' : fd < 0 ? ' ⬇樓下' : ''}`;
   } else arrow.style.display = 'none';
   hudT -= dt; if (hudT <= 0) { hudT = .25; updateHUD(); checkCollapse(); }
+}
+
+// ================= adventure: admin-placed monsters, treasure chests, timed buffs =================
+const chests = [];
+function spawnAdv(m) {
+  const fi = entFi(m); if (fi < 0 || !allFl()[fi] || !ENEMY[m.type]) return;
+  const pos = new THREE.Vector3(m.x, floorY(fi), -m.d), e = spawnEnemy(m.type, pos, 1);
+  e.adv = m; e.hp = e.max = e.d.hp * (m.hp || 1); e.spd = e.d.spd * (m.speed || 1); e.dmg = e.d.dmg * (m.dmg ?? 1); e.home = pos.clone();
+  if (e.d.boss && m.mode !== 'active') { G.boss = null; $('#bossbar').classList.remove('show'); }
+}
+function chestMesh() {
+  const g = new THREE.Group(), w = M('#8a5524', { r: .7 }), gold = M('#e0b030', { m: .8, r: .3, e: '#6a4a00', ei: .4 });
+  bx(g, .8, .42, .5, 0, 0, 0, w); for (const x of [-.36, .36]) bx(g, .06, .44, .52, x, 0, 0, gold);
+  const lid = new THREE.Group(); lid.position.set(0, .42, -.25); g.add(lid);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(.25, .25, .8, 12, 1, false, 0, Math.PI), w); top.rotation.z = Math.PI / 2; top.position.set(0, 0, .25); lid.add(top);
+  bx(lid, .1, .12, .04, 0, -.06, .52, gold);
+  const glow = sp(g, .12, 0, .5, 0, M('#ffe680', { e: '#ffd040', ei: 2, op: .0 })); glow.visible = false;
+  g.userData.lid = lid; g.userData.glow = glow; return g;
+}
+function startAdventure() {
+  setNight(false); lightCfg.intensity = 8; lightCfg.flicker = 0;
+  for (const m of S.data.monsters || []) spawnAdv(m);
+  for (const c of S.data.chests || []) {
+    const fi = entFi(c); if (fi < 0 || !allFl()[fi]) continue;
+    const mesh = chestMesh(); mesh.position.set(c.x, floorY(fi), -c.d); mesh.rotation.y = (c.rot || 0) * DEG; scene.add(mesh);
+    chests.push({ c, fi, mesh, open: false, t: 0, re: 0 });
+  }
+  banner('🗝 探險模式', '探索地下室、下水道…找寶箱、打怪物。靠近寶箱按 E / ✋', 3000); updateHUD();
+}
+function clearAdventure() { for (const c of chests) scene.remove(c.mesh); chests.length = 0; }
+function nearChest() {
+  if (!G.active || G.kind !== 'adventure') return null;
+  let best = null, bd = 1.6;
+  for (const c of chests) { if (c.open) continue; const p = c.mesh.position; if (Math.abs(p.y - player.pos.y) > 1.2) continue; const d = Math.hypot(p.x - player.pos.x, p.z - player.pos.z); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+export function advHint() { return nearChest() ? '打開寶箱' : ''; }
+export function advInteract() {
+  const c = nearChest(); if (!c || G.paused) return false;
+  c.open = true; c.t = 0; c.re = c.c.respawn || 0; Snd.init(); Snd.level();
+  giveLoot(c.c.loot || 'random', c.mesh.position.clone().add(new THREE.Vector3(0, .8, 0)));
+  burst(c.mesh.position.clone().add(new THREE.Vector3(0, .6, 0)), '#ffd84a', 24, 3, .06, 1.2, -1, { glow: 1 });
+  return true;
+}
+const BUFF_TXT = { speed: ['👟 加速！', 30], power: ['💪 攻擊力 ×2！', 30], shield: ['🛡️ 無敵護盾！', 15] };
+function giveLoot(loot, pos) {
+  if (loot === 'random') {
+    const pool = ['speed', 'power', 'shield', 'heal', 'potion', 'money', 'money'], ws = Object.keys(WEAPONS).filter(id => WEAPONS[id].g !== 'destroy' && id !== 'stick' && !(id in G.prof.owned));
+    if (ws.length) pool.push('weapon:' + ws[Math.floor(Math.random() * ws.length)], 'weapon:' + ws[Math.floor(Math.random() * ws.length)]);
+    loot = pool[Math.floor(Math.random() * pool.length)];
+  }
+  const p = G.prof;
+  if (loot.startsWith('weapon:')) {
+    const id = loot.slice(7), w = WEAPONS[id]; if (!w) return;
+    if (id in p.owned) { p.owned[id] = Math.min(5, p.owned[id] + 1); banner(`${w.icon} ${w.n} 升級！`, `Lv${p.owned[id] + 1}`, 1800); }
+    else { p.owned[id] = 0; equip(id); banner(`${w.icon} 得到 ${w.n}！`, '按 Q 或數字鍵切換武器', 2000); }
+    renderWeaponBar();
+  } else if (BUFF_TXT[loot]) { G.buffs[loot] = BUFF_TXT[loot][1]; banner(BUFF_TXT[loot][0], `${BUFF_TXT[loot][1]} 秒`, 1600); }
+  else if (loot === 'heal') { G.hp = G.maxHp; banner('❤️ 生命補滿！', '', 1400); }
+  else if (loot === 'potion') { p.potions = Math.min(9, (p.potions || 0) + 2); banner('🧪 補血藥水 ×2', '按 H 或 🧪 使用', 1600); }
+  else if (loot === 'money') { const m = 200 + Math.floor(Math.random() * 200); earn(m); floatText(`+$${m}`, pos); banner(`💰 $${m}`, '', 1400); }
+  saveProf(); updateHUD();
+}
+function updateAdventure(dt) {
+  const b = G.buffs; for (const k in b) if (b[k] > 0) { b[k] -= dt; if (b[k] <= 0) toast({ speed: '加速結束', power: '攻擊力恢復', shield: '護盾消失' }[k], 1200); }
+  const k = (1 + G.prof.spdLv * .08) * (b.speed > 0 ? 1.6 : 1); player.speed = 2.4 * k; player.run = 4.4 * k;
+  for (const c of chests) {
+    const lid = c.mesh.userData.lid;
+    if (c.open) { c.t += dt; lid.rotation.x = -Math.min(1.9, c.t * 4); if (c.re > 0 && c.t > c.re) { c.open = false; c.t = 0; } }
+    else { lid.rotation.x += (0 - lid.rotation.x) * Math.min(1, dt * 6); c.mesh.position.y = floorY(c.fi) + (Math.sin(G.t * 2 + c.fi) > .98 ? .02 : 0); }
+  }
+  // arrow to the nearest closed chest on this floor
+  const arrow = $('#garrow'), fi = floorOf(player.pos.y); let best = null, bd = 1e9;
+  for (const c of chests) if (!c.open && c.fi === fi) { const d = c.mesh.position.distanceTo(player.pos); if (d < bd) { bd = d; best = c; } }
+  if (best && bd > 2) { const dx = best.mesh.position.x - player.pos.x, dz = best.mesh.position.z - player.pos.z, ang = Math.atan2(dx, -dz) + player.yaw; arrow.style.display = 'block'; arrow.querySelector('i').style.transform = `rotate(${ang}rad)`; arrow.querySelector('span').textContent = `🎁 ${Math.round(bd)}m`; }
+  else arrow.style.display = 'none';
 }

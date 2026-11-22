@@ -118,8 +118,8 @@ export function updatePlayer(dt, t, canMove) {
   if (canMove && k.Space && player.ground) { player.vy = 4.2; player.ground = false; }
   const g = groundAt(player.pos.x, player.pos.z, player.pos.y);
   player.vy -= 12 * dt; player.pos.y += player.vy * dt;
-  if (player.pos.y <= g) { player.pos.y = g; player.vy = 0; player.ground = true; } else if (player.pos.y - g > .05) player.ground = false;
-  if (player.pos.y < -20) { player.pos.set(2.9, 0, 2.4); player.vy = 0; toast('掉出去了，回到大門口'); }
+  if (player.pos.y <= g) { player.pos.y = g; player.vy = 0; player.ground = true; player.lastG = g; } else if (player.pos.y - g > .05) player.ground = false;
+  if (g < -99 && player.pos.y < (player.lastG ?? 0) - 12) { player.pos.set(2.9, 0, 2.4); player.vy = 0; player.lastG = 0; toast('掉出去了，回到大門口'); }
   fx.shake = Math.max(0, fx.shake - dt * 2.5);
   const sh = fx.shake * fx.shake * .15;
   const bob = len > .05 && player.ground ? Math.sin(player.bob) * .025 : 0;

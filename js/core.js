@@ -118,6 +118,15 @@ const texMakers = {
     }
   }),
 };
+texMakers.backroom = () => canvasTex(256, 0.9, (g, s) => {
+  g.fillStyle = '#d9c77a'; g.fillRect(0, 0, s, s); const r = rng(77);
+  for (let x = 0; x < s; x += 16) { g.fillStyle = 'rgba(150,120,40,.18)'; g.fillRect(x, 0, 3, s); }
+  for (let i = 0; i < 40; i++) { g.strokeStyle = 'rgba(140,110,30,.25)'; g.beginPath(); const x = r() * s, y = r() * s; g.moveTo(x, y); g.lineTo(x + 6, y + 8); g.lineTo(x, y + 16); g.stroke(); }
+  noise(g, s, 5000, .05, r);
+});
+texMakers.moistcarpet = () => canvasTex(256, 1.2, (g, s) => { g.fillStyle = '#a89660'; g.fillRect(0, 0, s, s); const r = rng(78); noise(g, s, 18000, .12, r); for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(80,70,30,.18)'; g.beginPath(); g.ellipse(r() * s, r() * s, 20 + r() * 40, 12 + r() * 30, r() * 3, 0, 7); g.fill(); } });
+texMakers.sewer = () => canvasTex(256, 1.0, (g, s) => { grid(g, s, 4, '#4f5a4c', '#252b23', 5, .12, rng(79)); noise(g, s, 6000, .12, rng(80)); g.fillStyle = 'rgba(60,90,50,.25)'; g.fillRect(0, s * .7, s, s * .3); });
+texMakers.asphalt = () => canvasTex(256, 2, (g, s) => { g.fillStyle = '#4a4c50'; g.fillRect(0, 0, s, s); noise(g, s, 14000, .1, rng(81)); });
 const TEX = {};
 export function tex(name) { return TEX[name] || (TEX[name] = texMakers[name]()); }
 
@@ -145,8 +154,9 @@ export const PRESETS = {
   tile: { n: '白磁磚', tex: 'tile' }, greentile: { n: '綠腰磚', tex: 'greentile' }, smalltile: { n: '小方磚', tex: 'smalltile' }, beigetile: { n: '米色磚', tex: 'beigetile' },
   stone: { n: '灰石磚', tex: 'stone' }, concrete: { n: '水泥', tex: 'concrete' }, graycarpet: { n: '灰地墊', tex: 'graycarpet' },
   brick: { n: '紅磚', tex: 'brick' }, wallpaper: { n: '圖騰壁紙', tex: 'wallpaper' }, facade: { n: '外牆磚', tex: 'facade' },
+  backroom: { n: '後室壁紙', tex: 'backroom' }, moistcarpet: { n: '潮濕地毯', tex: 'moistcarpet' }, sewer: { n: '下水道石', tex: 'sewer' }, asphalt: { n: '柏油', tex: 'asphalt' },
 };
-export function presetColor(id) { const p = PRESETS[id]; if (!p) return '#ddd'; if (p.c) return p.c; return { marble: '#2a4a3e', wood: '#a8754a', lightwood: '#c7a274', wmarble: '#e8e8e4', tile: '#eeeeea', greentile: '#e0eadf', smalltile: '#dbe2e6', beigetile: '#d6c4a0', stone: '#8a8a85', concrete: '#9a9894', graycarpet: '#8c9096', brick: '#a8513a', wallpaper: '#d9d0bd', facade: '#d6ccba' }[p.tex] || '#ccc'; }
+export function presetColor(id) { const p = PRESETS[id]; if (!p) return '#ddd'; if (p.c) return p.c; return { marble: '#2a4a3e', wood: '#a8754a', lightwood: '#c7a274', wmarble: '#e8e8e4', tile: '#eeeeea', greentile: '#e0eadf', smalltile: '#dbe2e6', beigetile: '#d6c4a0', stone: '#8a8a85', concrete: '#9a9894', graycarpet: '#8c9096', brick: '#a8513a', wallpaper: '#d9d0bd', facade: '#d6ccba', backroom: '#d9c77a', moistcarpet: '#a89660', sewer: '#4f5a4c', asphalt: '#4a4c50' }[p.tex] || '#ccc'; }
 const presetMat = {};
 export function P(id) {
   if (presetMat[id]) return presetMat[id];

@@ -31,6 +31,7 @@ select option{color:#000}
 .cards button{padding:16px 10px;border-radius:14px;text-align:left;background:rgba(255,255,255,.07)}
 .cards button b{display:block;font-size:17px;margin-bottom:4px} .cards button small{color:var(--mut);font-size:12px;line-height:1.4;display:block}
 .cards button .em{font-size:28px;display:block;margin-bottom:6px}
+.cards.games{grid-template-columns:repeat(4,1fr)} @media(max-width:760px){.cards.games{grid-template-columns:repeat(2,1fr)}}
 .cards.games button{background:linear-gradient(160deg,rgba(232,116,58,.25),rgba(255,255,255,.05))}
 .cards .prog{display:inline-block;margin-top:6px;font-size:11px;background:rgba(0,0,0,.35);padding:2px 8px;border-radius:10px;color:#ffd08a}
 .sect{font-size:13px;color:var(--mut);margin:14px 0 8px}
@@ -91,6 +92,10 @@ body.touch .phelp{display:none}
 #ptools{position:absolute;left:8px;top:calc(62px + var(--sat));display:flex;flex-direction:column;gap:5px;z-index:2}
 #ptools button{display:flex;flex-direction:column;align-items:center;font-size:11px;padding:6px 4px;width:64px;background:rgba(20,24,30,.92)}
 #ptools button span{font-size:20px} #ptools button.on{background:var(--acc)}
+#ptools button.adm{border:1px solid #9a6cff} #ptools button.adm.on{background:#7a4cff}
+#pfloors button.zone{background:#2a3324} #pfloors button.adm{background:#3a2a5a;border:1px solid #9a6cff} #pfloors button.on{background:var(--acc)}
+#padm{display:none;background:#7a4cff;color:#fff;border-radius:10px;padding:3px 8px;font-size:12px;white-space:nowrap;margin-right:4px} #plan.admin #padm{display:inline-block}
+#btnAdmin{background:#3a2a5a}
 #planCanvas{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none}
 #pprops{position:absolute;right:8px;top:calc(62px + var(--sat));width:280px;max-height:calc(100% - 80px - var(--sat));overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;z-index:2;display:none}
 #pprops.show{display:block}
@@ -156,9 +161,9 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 <div id="menu">
   <div class="wrap">
     <h1>🏠 我家 3D</h1>
-    <p class="sub">依照錄影建立的三層樓透天厝：可以參觀、改裝潢、改格局，還有三款小遊戲</p>
+    <p class="sub">依照錄影建立的三層樓透天厝：可以參觀、改裝潢、改格局，還有地下室、下水道和四款小遊戲</p>
     <div class="cards">
-      <button data-go="visit"><span class="em">🚶</span><b>參觀</b><small>第一人稱逛 1F～3F，開門、開燈、日夜切換</small></button>
+      <button data-go="visit"><span class="em">🚶</span><b>參觀</b><small>第一人稱逛 1F～3F、地下室和馬路，開門、開燈、日夜切換</small></button>
       <button data-go="edit"><span class="em">🛋</span><b>改裝潢</b><small>在 3D 裡搬家具、換油漆、地板、壁紙</small></button>
       <button data-go="plan"><span class="em">📐</span><b>空間編輯</b><small>平面圖改房間尺寸、畫牆、加門窗、新增樓層</small></button>
     </div>
@@ -167,9 +172,10 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
       <button data-go="game:clean"><span class="em">🪳</span><b>清潔大作戰</b><small>掃把、水槍、殺蟲劑消滅蟑螂蚊子老鼠，打倒蟑螂王</small><span class="prog" id="prog-clean"></span></button>
       <button data-go="game:ghost"><span class="em">👻</span><b>驅鬼大師</b><small>艾草棒、聖水槍、符咒驅鬼，關卡越來越難，最後對決鬼王</small><span class="prog" id="prog-ghost"></span></button>
       <button data-go="game:destroy"><span class="em">🔨</span><b>拆家狂人</b><small>鐵鎚、武士刀、手榴彈、大砲把整個家拆光，隨時可復原</small><span class="prog" id="prog-destroy"></span></button>
+      <button data-go="game:adventure"><span class="em">🗝</span><b>探險模式</b><small>走進地下室、下水道、神秘傳送門，開寶箱拿武器與道具，打倒怪物</small><span class="prog" id="prog-adventure"></span></button>
     </div>
     <div class="sect">⚙️ 設定</div>
-    <div class="rowb"><button id="btnExport">⬇ 匯出設計</button><button id="btnImport">⬆ 匯入設計</button><input type="file" id="fileIn" accept=".json" hidden><button id="btnShot">📷 截圖</button><button id="btnFull">⛶ 全螢幕</button><button id="btnReset" class="danger">↺ 還原原始格局</button></div>
+    <div class="rowb"><button id="btnExport">⬇ 匯出設計</button><button id="btnImport">⬆ 匯入設計</button><input type="file" id="fileIn" accept=".json" hidden><button id="btnShot">📷 截圖</button><button id="btnFull">⛶ 全螢幕</button><button id="btnReset" class="danger">↺ 還原原始格局</button><button id="btnAdmin">🔐 管理員</button></div>
     <div class="keys">
       <kbd>W A S D</kbd><span>移動</span><kbd>滑鼠</kbd><span>轉視角</span>
       <kbd>Shift</kbd><span>跑步</span><kbd>空白鍵</kbd><span>跳</span>
@@ -205,7 +211,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 </div>
 
 <div id="plan">
-  <div id="ptop"><button data-go="visit" class="go">✓ 完成</button><b>📐</b><div id="pfloors"></div><span class="sp"></span><button id="pUndo">↶</button><button id="pRedo">↷</button><button id="pFit">⤢</button><button id="pSnap">格線</button></div>
+  <div id="ptop"><button data-go="visit" class="go">✓ 完成</button><b>📐</b><span id="padm">🔐 管理員</span><div id="pfloors"></div><span class="sp"></span><button id="pUndo">↶</button><button id="pRedo">↷</button><button id="pFit">⤢</button><button id="pSnap">格線</button></div>
   <canvas id="planCanvas"></canvas>
   <div id="ptools"></div>
   <div id="pprops"></div>

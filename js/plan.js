@@ -1,15 +1,27 @@
 // 2D floor-plan editor: rooms, walls, rails, doors, windows, furniture, stairs, floors
 import { S, $, toast, PRESETS, presetColor, clamp } from './core.js';
 import { CAT, footprint } from './catalog.js';
-import { stairGeom, stairBounds, DOOR_STYLE_NAMES } from './house.js';
+import { stairGeom, stairBounds, DOOR_STYLE_NAMES, allFl, entFi, PORTAL_STYLES, SEASONS, DEF_ENV } from './house.js';
+import { makeBackroom } from './zones.js';
 
 const cvs = $('#planCanvas'), ctx = cvs.getContext('2d');
 const P = { fi: 0, tool: 'select', sel: null, s: 40, ox: 0, oy: 0, drag: null, snap: true, hist: [], fut: [], onChange: null, placing: null };
 export const Plan = P;
 const OPS = { door: '單開門', door2: '雙開門', sliding: '拉門', window: '窗戶', opening: '開口(無門)' };
 const TOOLS = [['select', '👆', '選取/移動'], ['wall', '🧱', '畫牆'], ['rail', '🚧', '欄杆'], ['room', '⬛', '新增空間'], ['door', '🚪', '加門'], ['window', '🪟', '加窗'], ['opening', '⬜', '加開口'], ['stair', '🪜', '加樓梯'], ['furn', '🛋', '加家具']];
+const ADMIN_TOOLS = [['portal', '🌀', '傳送門'], ['monster', '👾', '怪物'], ['chest', '🎁', '寶箱'], ['env', '🌤', '環境']];
+export const MONSTER_TYPES = { roach: '🪳 蟑螂', mosquito: '🦟 蚊子', rat: '🐀 老鼠', wisp: '👻 小鬼', lady: '👩 紅衣女鬼', jiangshi: '🧟 殭屍', smiler: '😁 後室笑臉', hound: '🐺 黑影獵犬', roachKing: '👑 蟑螂王', ghostKing: '👹 鬼王' };
+const MICON = { roach: '🪳', mosquito: '🦟', rat: '🐀', wisp: '👻', lady: '👩', jiangshi: '🧟', smiler: '😁', hound: '🐺', roachKing: '👑', ghostKing: '👹' };
+export const LOOTS = { random: '🎲 隨機', speed: '👟 加速 30 秒', power: '💪 攻擊力 ×2（30 秒）', shield: '🛡️ 無敵護盾 15 秒', heal: '❤️ 補滿生命', potion: '🧪 補血藥水 ×2', money: '💰 金錢 $300',
+  'weapon:katana': '🗡️ 武器：武士刀', 'weapon:talisman': '📜 武器：符咒', 'weapon:holywater': '💧 武器：聖水槍', 'weapon:watergun': '🔫 武器：水槍', 'weapon:bagua': '☯️ 武器：八卦鏡', 'weapon:grenade': '💣 武器：手榴彈', 'weapon:bell': '🔔 武器：法鈴', 'weapon:rocket': '🚀 武器：火箭筒' };
+const vis = o => S.admin || !o.admin;
+const adm = () => S.admin ? { admin: 1 } : {};
+const nF = () => S.data.floors.length;
+const curRef = () => P.fi < nF() ? { fi: P.fi } : { zid: fl().id };
+const onFloor = e => entFi(e) === P.fi;
+const flName = ref => { const i = entFi(ref); return allFl()[i]?.name || '?'; };
 const nid = p => p + (S.data.nextId++);
-const fl = () => S.data.floors[P.fi];
+const fl = () => allFl()[P.fi] || S.data.floors[0];
 const snapV = v => P.snap ? Math.round(v / .05) * .05 : Math.round(v / .01) * .01;
 // The plan is a true top-down view as seen when you stand at the front door facing into the house:
 // street at the bottom, walking in goes UP the screen, and the left/right walls are on the same side as in 3D.
@@ -18,7 +30,9 @@ const toS = (x, d) => [P.ox + x * P.s, P.oy + F * d * P.s];
 const toP = (sx, sy) => [(sx - P.ox) / P.s, F * (sy - P.oy) / P.s];
 
 export function openPlan() {
-  $('#plan').classList.add('show'); resize(); if (!P.hist.length) pushHist(); fit(); buildToolbar(); renderProps(); draw();
+  if (!allFl()[P.fi] || !vis(allFl()[P.fi])) P.fi = 0;
+  if (!S.admin && ADMIN_TOOLS.some(t => t[0] === P.tool)) P.tool = 'select';
+  $('#plan').classList.add('show'); $('#plan').classList.toggle('admin', !!S.admin); resize(); if (!P.hist.length) pushHist(); fit(); buildToolbar(); renderProps(); draw();
 }
 export function closePlan() { $('#plan').classList.remove('show'); P.sel = null; }
 function resize() { const r = cvs.getBoundingClientRect(); cvs.width = r.width * devicePixelRatio; cvs.height = r.height * devicePixelRatio; }
@@ -35,19 +49,20 @@ function pushHist() { P.hist.push(JSON.stringify(S.data)); if (P.hist.length > 6
 function commit() { pushHist(); S.save && S.save(); P.onChange && P.onChange(); renderProps(); draw(); }
 function undo() { if (P.hist.length < 2) return; P.fut.push(P.hist.pop()); S.data = JSON.parse(P.hist[P.hist.length - 1]); P.sel = null; afterLoad(); }
 function redo() { if (!P.fut.length) return; const s = P.fut.pop(); P.hist.push(s); S.data = JSON.parse(s); P.sel = null; afterLoad(); }
-function afterLoad() { P.fi = Math.min(P.fi, S.data.floors.length - 1); S.save && S.save(); P.onChange && P.onChange(); buildToolbar(); renderProps(); draw(); }
+function afterLoad() { P.fi = Math.min(P.fi, allFl().length - 1); S.save && S.save(); P.onChange && P.onChange(); buildToolbar(); renderProps(); draw(); }
 
 // ---------- toolbar ----------
 function buildToolbar() {
-  $('#pfloors').innerHTML = S.data.floors.map((f, i) => `<button data-f="${i}" class="${i === P.fi ? 'on' : ''}">${f.name}</button>`).join('') + `<button id="pAddF" title="新增樓層">＋</button>`;
-  $('#pfloors').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { P.fi = +b.dataset.f; P.sel = null; buildToolbar(); renderProps(); fit(); draw(); });
-  $('#pAddF').onclick = addFloor;
-  $('#ptools').innerHTML = TOOLS.map(([id, ic, n]) => `<button data-t="${id}" class="${P.tool === id ? 'on' : ''}"><span>${ic}</span>${n}</button>`).join('');
-  $('#ptools').querySelectorAll('[data-t]').forEach(b => b.onclick = () => { P.tool = b.dataset.t; if (P.tool === 'furn') showCatalog(); buildToolbar(); hintTool(); });
+  $('#pfloors').innerHTML = allFl().map((f, i) => vis(f) ? `<button data-f="${i}" class="${i === P.fi ? 'on' : ''} ${i >= nF() ? 'zone' : ''} ${f.admin ? 'adm' : ''}">${f.name}</button>` : '').join('') + `<button id="pAddF" title="新增樓層">＋</button>` + (S.admin ? `<button id="pAddBR" title="新增後室">＋後室</button>` : '');
+  $('#pfloors').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { P.fi = +b.dataset.f; if (!P.pickTarget) P.sel = null; buildToolbar(); renderProps(); fit(); draw(); });
+  $('#pAddF').onclick = addFloor; if ($('#pAddBR')) $('#pAddBR').onclick = addBackroom;
+  const tools = S.admin ? [...TOOLS, ...ADMIN_TOOLS] : TOOLS;
+  $('#ptools').innerHTML = tools.map(([id, ic, n]) => `<button data-t="${id}" class="${P.tool === id ? 'on' : ''} ${ADMIN_TOOLS.some(t => t[0] === id) ? 'adm' : ''}"><span>${ic}</span>${n}</button>`).join('');
+  $('#ptools').querySelectorAll('[data-t]').forEach(b => b.onclick = () => { P.tool = b.dataset.t; if (P.tool === 'furn') showCatalog(); if (P.tool === 'env') { P.sel = null; renderProps(); } buildToolbar(); hintTool(); });
   $('#pSnap').classList.toggle('on', P.snap);
 }
 function hintTool() {
-  const h = { select: '點選物件後拖曳；拖曳空白處平移；雙指縮放', wall: '按住拖曳畫一道牆（自動對齊水平/垂直）', rail: '按住拖曳畫欄杆', room: '按住拖曳框出新的空間', door: '點一下牆壁加入門', window: '點一下牆壁加入窗戶', opening: '點一下牆壁加入無門開口', stair: '點一下放置樓梯（通往上一層）', furn: '從清單選一件家具' }[P.tool];
+  const h = { select: '點選物件後拖曳；拖曳空白處平移；雙指縮放', wall: '按住拖曳畫一道牆（自動對齊水平/垂直）', rail: '按住拖曳畫欄杆', room: '按住拖曳框出新的空間', door: '點一下牆壁加入門', window: '點一下牆壁加入窗戶', opening: '點一下牆壁加入無門開口', stair: '點一下放置樓梯（通往上一層）', furn: '從清單選一件家具', portal: '點一下放置傳送門，再設定目的地', monster: '點一下放置怪物', chest: '點一下放置寶箱', env: '在右側調整季節、亮度、顏色' }[P.tool];
   $('#phint').textContent = h;
 }
 $('#pUndo').onclick = undo; $('#pRedo').onclick = redo; $('#pFit').onclick = () => { fit(); draw(); };
@@ -60,7 +75,20 @@ function addFloor() {
   if (lastSt) S.data.stairs.push({ ...lastSt, id: nid('st'), floor: S.data.floors.length - 2 });
   P.fi = S.data.floors.length - 1; P.sel = null; toast(`已新增 ${nf.name}（複製上一層的空間與牆）`); buildToolbar(); commit(); fit(); draw();
 }
+function addBackroom() {
+  const k = (S.data.zones || []).filter(z => z.kind === 'backroom').length, z = makeBackroom(nid, k, Math.floor(Math.random() * 1000));
+  (S.data.zones || (S.data.zones = [])).push(z);
+  (S.data.portals || (S.data.portals = [])).push({ id: nid('p'), zid: z.id, x: 18.75, d: 18.75, rot: 0, style: 'portal', name: '出口', admin: 1, to: { zid: 'b1', x: 4.2, d: 1.6 } });
+  P.fi = allFl().length - 1; P.sel = null; buildToolbar(); commit(); fit(); draw();
+  toast(`已新增 ${z.name}：用「🌀 傳送門」在其他樓層放入口，目的地選這一層`, 4000);
+}
 function delFloor() {
+  if (P.fi >= nF()) {
+    const z = fl(); if (!S.admin && z.admin) return; if (!confirm(`刪除 ${z.name}？裡面的傳送門、怪物、寶箱也會一起刪除。`)) return;
+    S.data.zones = S.data.zones.filter(x => x !== z);
+    for (const k of ['portals', 'monsters', 'chests']) S.data[k] = (S.data[k] || []).filter(e => e.zid !== z.id && e.to?.zid !== z.id);
+    P.fi = 0; P.sel = null; buildToolbar(); commit(); return;
+  }
   if (S.data.floors.length <= 1) return toast('至少要保留一層');
   if (P.fi !== S.data.floors.length - 1) return toast('只能刪除最上面一層');
   if (!confirm(`刪除 ${fl().name}？`)) return;
@@ -79,9 +107,10 @@ function draw() {
   for (let d = Math.floor(gd0); d <= gd1; d += step) { const [, sy] = toS(0, d); ctx.strokeStyle = d % 1 === 0 ? '#262c34' : '#1e232a'; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(r.width, sy); ctx.stroke(); }
   const f = fl();
   // lower floor ghost
-  if (P.fi > 0) { ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); for (const w of S.data.floors[P.fi - 1].walls) { ctx.beginPath(); ctx.moveTo(...toS(w.x1, w.d1)); ctx.lineTo(...toS(w.x2, w.d2)); ctx.stroke(); } ctx.setLineDash([]); }
+  if (P.fi > 0 && P.fi < nF()) { ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); for (const w of S.data.floors[P.fi - 1].walls) { ctx.beginPath(); ctx.moveTo(...toS(w.x1, w.d1)); ctx.lineTo(...toS(w.x2, w.d2)); ctx.stroke(); } ctx.setLineDash([]); }
   // rooms
   for (const rm of f.rooms) {
+    if (!vis(rm)) continue;
     const [a, b] = toS(rm.x0, rm.d0), [c, d] = toS(rm.x1, rm.d1);
     ctx.fillStyle = presetColor(rm.floor) + 'aa'; ctx.fillRect(a, b, c - a, d - b);
     ctx.strokeStyle = isSel('room', rm) ? '#ffb020' : 'rgba(255,255,255,.25)'; ctx.lineWidth = isSel('room', rm) ? 3 : 1; ctx.strokeRect(a, b, c - a, d - b);
@@ -104,7 +133,7 @@ function draw() {
   }
   // furniture
   for (const fu of f.furniture) {
-    if (!CAT[fu.type]) continue;
+    if (!CAT[fu.type] || !vis(fu)) continue;
     const fp = footprint(fu.type), [sx, sy] = toS(fu.x, fu.d);
     ctx.save(); ctx.translate(sx, sy); ctx.rotate(-(fu.rot || 0) * Math.PI / 180);
     ctx.fillStyle = isSel('furn', fu) ? 'rgba(255,176,32,.6)' : 'rgba(210,170,110,.45)'; ctx.strokeStyle = isSel('furn', fu) ? '#ffb020' : 'rgba(255,230,190,.6)'; ctx.lineWidth = 1.5;
@@ -116,6 +145,7 @@ function draw() {
   }
   // walls
   for (const w of f.walls) {
+    if (!vis(w)) continue;
     const sel = isSel('wall', w), A = toS(w.x1, w.d1), B = toS(w.x2, w.d2);
     ctx.lineCap = 'butt'; ctx.strokeStyle = sel ? '#ffb020' : (w.kind === 'rail' ? '#9aa' : '#eceae4'); ctx.lineWidth = w.kind === 'rail' ? Math.max(2, .06 * P.s) : Math.max(3, .14 * P.s);
     if (w.kind === 'rail') ctx.setLineDash([6, 4]);
@@ -143,8 +173,11 @@ function draw() {
     }
     if (sel) { handle(...A); handle(...B); if (P.s > 25) label(L.toFixed(2) + 'm', (w.x1 + w.x2) / 2, (w.d1 + w.d2) / 2 - F * .25, '#ffb020', 11); }
   }
+  // portals / monsters / chests
+  drawEntities();
   // room labels on top
   for (const rm of f.rooms) {
+    if (!vis(rm)) continue;
     const w = rm.x1 - rm.x0, d = rm.d1 - rm.d0;
     label(rm.name, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 - F * (P.s > 30 ? .15 : 0), '#fff', 12, true);
     if (P.s > 30) label(`${w.toFixed(2)}×${d.toFixed(2)}m`, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 + F * .25, 'rgba(255,255,255,.7)', 10);
@@ -156,6 +189,31 @@ function draw() {
   if (dg && dg.mode === 'newroom' && dg.end) { const [a, b] = toS(Math.min(dg.start[0], dg.end[0]), Math.min(dg.start[1], dg.end[1])), [c, d] = toS(Math.max(dg.start[0], dg.end[0]), Math.max(dg.start[1], dg.end[1])); ctx.fillStyle = 'rgba(255,176,32,.25)'; ctx.fillRect(a, b, c - a, d - b); ctx.strokeStyle = '#ffb020'; ctx.strokeRect(a, b, c - a, d - b); }
   // compass: street side
   ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; const [sx0, sy0] = toS(2.5, -3.75); ctx.fillText('▼ 馬路・大門（前）', sx0, sy0); const [sx1, sy1] = toS(2.5, 16.9); ctx.fillText('▲ 後面', sx1, sy1);
+}
+function drawEntities() {
+  for (const pt of S.data.portals || []) {
+    if (!vis(pt)) continue;
+    if (onFloor(pt)) {
+      const [sx, sy] = toS(pt.x, pt.d), sel = isSel('portal', pt);
+      ctx.fillStyle = sel ? '#ffb020' : 'rgba(160,110,255,.85)'; ctx.beginPath(); ctx.arc(sx, sy, Math.max(8, .4 * P.s), 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+      label((PORTAL_STYLES[pt.style] || '🌀').split(' ')[0], pt.x, pt.d, '#fff', 13);
+      label(`${pt.name || ''} → ${pt.to ? flName(pt.to) : '未設定'}`, pt.x, pt.d - F * .6, '#d9c4ff', 11);
+    }
+    if (pt.to && entFi(pt.to) === P.fi && S.admin) { const [sx, sy] = toS(pt.to.x, pt.to.d); ctx.strokeStyle = '#7cff9a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(sx, sy, 7, 0, 7); ctx.stroke(); ctx.setLineDash([]); label('抵達', pt.to.x, pt.to.d + F * .4, '#7cff9a', 10); }
+  }
+  if (!S.admin) return;
+  for (const m of S.data.monsters || []) {
+    if (!onFloor(m)) continue; const [sx, sy] = toS(m.x, m.d), sel = isSel('monster', m);
+    if (m.mode === 'active') { ctx.strokeStyle = 'rgba(255,80,80,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(sx, sy, (m.range || 10) * P.s, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle = sel ? '#ffb020' : m.mode === 'active' ? 'rgba(230,60,60,.9)' : 'rgba(90,160,90,.9)'; ctx.beginPath(); ctx.arc(sx, sy, Math.max(8, .32 * P.s), 0, 7); ctx.fill();
+    label(MICON[m.type] || '👾', m.x, m.d, '#fff', 13);
+  }
+  for (const c of S.data.chests || []) {
+    if (!onFloor(c)) continue; const [sx, sy] = toS(c.x, c.d), sel = isSel('chest', c), h = Math.max(8, .3 * P.s);
+    ctx.fillStyle = sel ? '#ffb020' : '#c9902a'; ctx.fillRect(sx - h, sy - h * .7, h * 2, h * 1.4); ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 1.5; ctx.strokeRect(sx - h, sy - h * .7, h * 2, h * 1.4);
+    label('🎁', c.x, c.d, '#fff', 12);
+  }
 }
 function label(t, x, d, c, size = 12, bold) { const [sx, sy] = toS(x, d); ctx.font = `${bold ? 'bold ' : ''}${size}px -apple-system,"PingFang TC",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(t, sx + 1, sy + 1); ctx.fillStyle = c; ctx.fillText(t, sx, sy); }
 function handle(sx, sy) { ctx.fillStyle = '#ffb020'; ctx.fillRect(sx - 6, sy - 6, 12, 12); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(sx - 6, sy - 6, 12, 12); }
@@ -169,25 +227,29 @@ function segInfo(x, d, w) {
 }
 function pick(x, d) {
   const f = fl(), tol = 10 / P.s;
+  if (S.admin) {
+    const er = Math.max(.45, tol);
+    for (const [k, list] of [['portal', S.data.portals], ['monster', S.data.monsters], ['chest', S.data.chests]]) for (const e of list || []) if (onFloor(e) && Math.hypot(e.x - x, e.d - d) < er) return { k, o: e };
+  }
   if (P.sel) {
     if (P.sel.k === 'room') for (const [hx, hd, h] of roomHandles(P.sel.o)) if (Math.abs(x - hx) < tol && Math.abs(d - hd) < tol) return { k: 'room', o: P.sel.o, h };
     if (P.sel.k === 'wall') { const w = P.sel.o; if (Math.hypot(x - w.x1, d - w.d1) < tol * 1.3) return { k: 'wall', o: w, h: 1 }; if (Math.hypot(x - w.x2, d - w.d2) < tol * 1.3) return { k: 'wall', o: w, h: 2 }; }
   }
-  for (const w of f.walls) { const si = segInfo(x, d, w); if (si.dist > tol + .1) continue; for (const o of w.ops || []) if (si.s > o.at - o.w / 2 - .05 && si.s < o.at + o.w / 2 + .05) return { k: 'op', o, w }; }
+  for (const w of f.walls) { if (!vis(w)) continue; const si = segInfo(x, d, w); if (si.dist > tol + .1) continue; for (const o of w.ops || []) if (si.s > o.at - o.w / 2 - .05 && si.s < o.at + o.w / 2 + .05) return { k: 'op', o, w }; }
   let best = null;
-  for (const w of f.walls) { const si = segInfo(x, d, w); if (si.dist < tol * .7 + .07 && (!best || si.dist < best.dist)) best = { k: 'wall', o: w, dist: si.dist }; }
+  for (const w of f.walls) { if (!vis(w)) continue; const si = segInfo(x, d, w); if (si.dist < tol * .7 + .07 && (!best || si.dist < best.dist)) best = { k: 'wall', o: w, dist: si.dist }; }
   if (best) return best;
   for (let i = f.furniture.length - 1; i >= 0; i--) {
-    const fu = f.furniture[i]; if (!CAT[fu.type]) continue; const fp = footprint(fu.type), a = (fu.rot || 0) * Math.PI / 180;
+    const fu = f.furniture[i]; if (!CAT[fu.type] || !vis(fu)) continue; const fp = footprint(fu.type), a = (fu.rot || 0) * Math.PI / 180;
     const lx = (x - fu.x) * Math.cos(a) - (-(d - fu.d)) * Math.sin(a), lz = (x - fu.x) * Math.sin(a) + (-(d - fu.d)) * Math.cos(a);
     if (Math.abs(lx - fp.cx) < fp.w / 2 + .05 && Math.abs(lz - fp.cz) < fp.d / 2 + .05) return { k: 'furn', o: fu };
   }
   for (const st of S.data.stairs) { const B = stairBounds(st); if ((st.floor === P.fi || st.floor === P.fi - 1) && x > B.x0 && x < B.x1 && d > B.d0 && d < B.d1) return { k: 'stair', o: st }; }
   let rb = null;
-  for (const r of f.rooms) if (x > r.x0 && x < r.x1 && d > r.d0 && d < r.d1) { const a = (r.x1 - r.x0) * (r.d1 - r.d0); if (!rb || a < rb.a) rb = { k: 'room', o: r, a }; }
+  for (const r of f.rooms) if (vis(r) && x > r.x0 && x < r.x1 && d > r.d0 && d < r.d1) { const a = (r.x1 - r.x0) * (r.d1 - r.d0); if (!rb || a < rb.a) rb = { k: 'room', o: r, a }; }
   return rb;
 }
-function nearestWall(x, d, maxD = .6) { let b = null; for (const w of fl().walls) { if (w.kind === 'rail') continue; const si = segInfo(x, d, w); if (si.dist < maxD && (!b || si.dist < b.si.dist)) b = { w, si }; } return b; }
+function nearestWall(x, d, maxD = .6) { let b = null; for (const w of fl().walls) { if (w.kind === 'rail' || !vis(w)) continue; const si = segInfo(x, d, w); if (si.dist < maxD && (!b || si.dist < b.si.dist)) b = { w, si }; } return b; }
 function snapPoint(x, d, exclude) {
   let best = null; const tol = Math.max(.12, 12 / P.s);
   for (const w of fl().walls) for (const [px, pd] of [[w.x1, w.d1], [w.x2, w.d2]]) { if (exclude && exclude(w)) continue; const dd = Math.hypot(px - x, pd - d); if (dd < tol && (!best || dd < best[2])) best = [px, pd, dd]; }
@@ -202,6 +264,15 @@ cvs.addEventListener('pointerdown', e => {
   const rc = cvs.getBoundingClientRect(), sx = e.clientX - rc.left, sy = e.clientY - rc.top, [x, d] = toP(sx, sy);
   if (e.button === 1 || e.button === 2) { P.drag = { mode: 'pan', sx, sy, ox: P.ox, oy: P.oy }; return; }
   const t = P.tool;
+  if (P.pickTarget) { const pt = P.pickTarget; pt.to = { ...curRef(), x: snapV(x), d: snapV(d) }; P.pickTarget = null; P.sel = { k: 'portal', o: pt }; toast(`目的地設為 ${fl().name}`); commit(); return; }
+  if (S.admin && (t === 'portal' || t === 'monster' || t === 'chest')) {
+    const base = { id: nid(t[0]), ...curRef(), x: snapV(x), d: snapV(d), rot: 0, admin: 1 };
+    let o;
+    if (t === 'portal') { o = { ...base, style: 'portal', name: '傳送門', to: null }; (S.data.portals || (S.data.portals = [])).push(o); toast('按右側「🎯 點選目的地」設定要傳送到哪裡', 3000); }
+    if (t === 'monster') { o = { ...base, type: 'roach', mode: 'active', speed: 1, hp: 1, dmg: 1, range: 10, respawn: 60 }; (S.data.monsters || (S.data.monsters = [])).push(o); }
+    if (t === 'chest') { o = { ...base, loot: 'random', respawn: 0 }; (S.data.chests || (S.data.chests = [])).push(o); }
+    P.sel = { k: t, o }; P.tool = 'select'; buildToolbar(); commit(); return;
+  }
   if (t === 'wall' || t === 'rail') { P.drag = { mode: 'newwall', start: snapPoint(x, d), end: null, rail: t === 'rail' }; return; }
   if (t === 'room') { P.drag = { mode: 'newroom', start: [snapV(x), snapV(d)], end: null }; return; }
   if (t === 'stair') {
@@ -250,7 +321,7 @@ cvs.addEventListener('pointermove', e => {
       if (h.h) { const [px, pd] = snapPoint(x, d, w => w === o); o['x' + h.h] = px; o['d' + h.h] = pd; for (const [w2, e2, mine] of dg.start.joined) if (mine === h.h) { w2['x' + e2] = px; w2['d' + e2] = pd; } }
       else { const mx = snapV(dx), md = snapV(dd); o.x1 = s.x1 + mx; o.d1 = s.d1 + md; o.x2 = s.x2 + mx; o.d2 = s.d2 + md; for (const [w2, e2, mine] of dg.start.joined) { w2['x' + e2] = o['x' + mine]; w2['d' + e2] = o['d' + mine]; } }
     } else if (h.k === 'op') { const si = segInfo(x, d, h.w); o.at = clamp(snapV(si.s), o.w / 2, si.L - o.w / 2); }
-    else if (h.k === 'furn' || h.k === 'stair') { o.x = snapV(s.x + dx); o.d = snapV(s.d + dd); }
+    else if (h.k === 'furn' || h.k === 'stair' || h.k === 'portal' || h.k === 'monster' || h.k === 'chest') { o.x = snapV(s.x + dx); o.d = snapV(s.d + dd); }
     draw();
   }
 });
@@ -259,12 +330,12 @@ function pointerEnd(e) {
   const dg = P.drag; P.drag = null; if (!dg) return;
   if (dg.mode === 'newwall' && dg.end) {
     const L = Math.hypot(dg.end[0] - dg.start[0], dg.end[1] - dg.start[1]);
-    if (L >= .2) { const w = { id: nid('w'), x1: dg.start[0], d1: dg.start[1], x2: dg.end[0], d2: dg.end[1], a: 'cream', b: 'cream', kind: dg.rail ? 'rail' : 'wall', ops: [] }; fl().walls.push(w); P.sel = { k: 'wall', o: w }; commit(); }
+    if (L >= .2) { const w = { id: nid('w'), x1: dg.start[0], d1: dg.start[1], x2: dg.end[0], d2: dg.end[1], a: 'cream', b: 'cream', kind: dg.rail ? 'rail' : 'wall', ops: [], ...adm() }; fl().walls.push(w); P.sel = { k: 'wall', o: w }; commit(); }
     draw(); return;
   }
   if (dg.mode === 'newroom' && dg.end) {
     const x0 = Math.min(dg.start[0], dg.end[0]), x1 = Math.max(dg.start[0], dg.end[0]), d0 = Math.min(dg.start[1], dg.end[1]), d1 = Math.max(dg.start[1], dg.end[1]);
-    if (x1 - x0 >= .3 && d1 - d0 >= .3) { const r = { id: nid('r'), name: '新空間', x0, d0, x1, d1, floor: 'wood' }; fl().rooms.push(r); P.sel = { k: 'room', o: r }; P.tool = 'select'; buildToolbar(); commit(); toast('已新增空間，可在右側「加四面牆」'); }
+    if (x1 - x0 >= .3 && d1 - d0 >= .3) { const r = { id: nid('r'), name: '新空間', x0, d0, x1, d1, floor: 'wood', ...adm() }; fl().rooms.push(r); P.sel = { k: 'room', o: r }; P.tool = 'select'; buildToolbar(); commit(); toast('已新增空間，可在右側「加四面牆」'); }
     draw(); return;
   }
   if (dg.mode === 'move' && dg.moved) commit();
@@ -280,7 +351,7 @@ addEventListener('keydown', e => {
   if ((e.key === 'Delete' || e.key === 'Backspace') && P.sel) { e.preventDefault(); delSel(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if (e.key === 'r' && P.sel?.k === 'furn') { P.sel.o.rot = ((P.sel.o.rot || 0) + 90) % 360; commit(); }
-  if (e.key === 'Escape') { P.sel = null; P.tool = 'select'; buildToolbar(); renderProps(); draw(); }
+  if (e.key === 'Escape') { P.pickTarget = null; P.sel = null; P.tool = 'select'; buildToolbar(); renderProps(); draw(); }
 });
 
 // ---------- selection ops ----------
@@ -291,12 +362,13 @@ function delSel() {
   if (s.k === 'op') s.w.ops = s.w.ops.filter(o => o !== s.o);
   if (s.k === 'furn') f.furniture = f.furniture.filter(o => o !== s.o);
   if (s.k === 'stair') { if (!confirm('刪除樓梯？上下樓會無法通行。')) return; S.data.stairs = S.data.stairs.filter(o => o !== s.o); }
+  for (const [k, key] of [['portal', 'portals'], ['monster', 'monsters'], ['chest', 'chests']]) if (s.k === k) S.data[key] = S.data[key].filter(o => o !== s.o);
   P.sel = null; commit();
 }
 function wallsAround(r) {
   const f = fl(), has = (x1, d1, x2, d2) => f.walls.some(w => (Math.hypot(w.x1 - x1, w.d1 - d1) < .05 && Math.hypot(w.x2 - x2, w.d2 - d2) < .05) || (Math.hypot(w.x1 - x2, w.d1 - d2) < .05 && Math.hypot(w.x2 - x1, w.d2 - d1) < .05));
   let n = 0;
-  for (const [x1, d1, x2, d2] of [[r.x0, r.d0, r.x1, r.d0], [r.x1, r.d0, r.x1, r.d1], [r.x0, r.d1, r.x1, r.d1], [r.x0, r.d0, r.x0, r.d1]]) if (!has(x1, d1, x2, d2)) { f.walls.push({ id: nid('w'), x1, d1, x2, d2, a: 'cream', b: 'cream', kind: 'wall', ops: [] }); n++; }
+  for (const [x1, d1, x2, d2] of [[r.x0, r.d0, r.x1, r.d0], [r.x1, r.d0, r.x1, r.d1], [r.x0, r.d1, r.x1, r.d1], [r.x0, r.d0, r.x0, r.d1]]) if (!has(x1, d1, x2, d2)) { f.walls.push({ id: nid('w'), x1, d1, x2, d2, a: 'cream', b: 'cream', kind: 'wall', ops: [], ...adm() }); n++; }
   toast(n ? `已加入 ${n} 面牆，再用「加門」開門` : '四周已經有牆了'); commit();
 }
 function splitWall(w) {
@@ -310,7 +382,7 @@ function showCatalog() {
   $('#pprops').classList.add('show');
   $('#pprops').querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
     const r = cvs.getBoundingClientRect(), [x, d] = toP(r.width / 2, r.height / 2), type = b.dataset.add;
-    const fu = { type, x: snapV(x), d: snapV(d), rot: 0, y: CAT[type].y || 0 }; fl().furniture.push(fu); P.sel = { k: 'furn', o: fu }; P.tool = 'select'; buildToolbar(); commit(); toast(`已加入${CAT[type].n}，拖曳到想要的位置`);
+    const fu = { type, x: snapV(x), d: snapV(d), rot: 0, y: CAT[type].y || 0, ...adm() }; fl().furniture.push(fu); P.sel = { k: 'furn', o: fu }; P.tool = 'select'; buildToolbar(); commit(); toast(`已加入${CAT[type].n}，拖曳到想要的位置`);
   });
 }
 function swatchSelect(cur, name) { return `<div class="sws" data-name="${name}">${Object.entries(PRESETS).map(([id, p]) => `<button data-v="${id}" title="${p.n}" class="${id === cur ? 'on' : ''}" style="background:${presetColor(id)}"></button>`).join('')}</div>`; }
@@ -326,8 +398,9 @@ export function renderProps() {
   const el = $('#pprops'), s = P.sel;
   if (!s) {
     if (P.tool === 'furn') return showCatalog();
+    if (P.tool === 'env' && S.admin) return envProps();
     el.innerHTML = `<div class="ph">${fl().name} 平面圖</div><div class="tip">・點選房間、牆、門窗、家具或樓梯來修改<br>・拖曳房間的黃色方塊調整尺寸<br>・拖曳牆的端點改長度，相連的牆會一起動<br>・用左邊工具畫牆、框新空間、加門窗<br>・修改會自動存檔並更新 3D</div>
-      <div class="rowb"><button id="pRename">✏️ 樓層名稱</button><button id="pDelF">🗑 刪除此樓層</button></div>`;
+      <div class="rowb"><button id="pRename">✏️ 樓層名稱</button><button id="pDelF">🗑 刪除此${P.fi >= nF() ? '區域' : '樓層'}</button></div>${S.admin ? '<div class="tip">🔐 管理員模式：這裡新增的空間、牆、家具、傳送門、怪物、寶箱，一般使用者在空間編輯看不到（遊戲裡看得到）。</div>' : ''}`;
     el.classList.toggle('show', innerWidth > 760);
     $('#pRename').onclick = () => { const n = prompt('樓層名稱', fl().name); if (n) { fl().name = n; buildToolbar(); commit(); } };
     $('#pDelF').onclick = delFloor; return;
@@ -367,12 +440,37 @@ export function renderProps() {
       <div class="tip">方向：${['朝前 ↑', '朝右 →', '朝後 ↓', '朝左 ←'][((st.rot || 0) % 360) / 90]}${st.flip ? '（鏡像）' : ''}　黃色箭頭是往上走的路線，綠點是上一層的出口。</div>
       <div class="rowb"><button id="pStL">↺ 轉 90°</button><button id="pStR">↻ 轉 90°</button><button id="pStF">⇋ 左右鏡像</button><button id="pDel" class="danger">🗑 刪除樓梯</button></div>`;
   }
+  else if (s.k === 'portal') {
+    const o = s.o, opts = allFl().map((f, i) => vis(f) ? `<option value="${i}" ${o.to && entFi(o.to) === i ? 'selected' : ''}>${f.name}</option>` : '').join('');
+    h = `<div class="ph">🌀 傳送門</div><label class="pf"><span>名稱</span><input type="text" data-k="name" value="${o.name || ''}"></label>
+      <label class="pf"><span>外觀</span><select data-k="style">${Object.entries(PORTAL_STYLES).map(([k, n]) => `<option value="${k}" ${k === o.style ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      ${num('X', 'x', o.x)}${num('深度', 'd', o.d)}${num('旋轉 (度)', 'rot', o.rot || 0, 15, -360, 360)}
+      <div class="grp">目的地</div><label class="pf"><span>樓層/區域</span><select data-k="tofl"><option value="">（未設定）</option>${opts}</select></label>
+      ${o.to ? num('目的 X', 'tox', o.to.x) + num('目的 深度', 'tod', o.to.d) : ''}
+      <div class="tip">${o.style === 'portal' || o.style === 'door' ? '走進去就會傳送' : '靠近按 E / ✋ 使用'}　抵達點在地圖上是綠色圓圈。</div>
+      <div class="rowb"><button id="pPickT">🎯 點選目的地</button><button id="pBack">↩ 建立回程</button><button id="pDel" class="danger">🗑 刪除</button></div>`;
+  } else if (s.k === 'monster') {
+    const o = s.o;
+    h = `<div class="ph">👾 怪物</div><label class="pf"><span>種類</span><select data-k="type">${Object.entries(MONSTER_TYPES).map(([k, n]) => `<option value="${k}" ${k === o.type ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label class="pf"><span>行為</span><select data-k="mode"><option value="active" ${o.mode === 'active' ? 'selected' : ''}>主動（看到就追）</option><option value="passive" ${o.mode !== 'active' ? 'selected' : ''}>被動（被打才反擊）</option></select></label>
+      ${num('速度 ×', 'speed', o.speed ?? 1, .1, .2, 4)}${num('血量 ×', 'hp', o.hp ?? 1, .1, .2, 20)}${num('攻擊力 ×', 'dmg', o.dmg ?? 1, .1, 0, 10)}${num('偵測範圍 (m)', 'range', o.range ?? 10, .5, 1, 40)}${num('重生秒數 (0=不重生)', 'respawn', o.respawn ?? 60, 5, 0, 900)}
+      ${num('X', 'x', o.x)}${num('深度', 'd', o.d)}
+      <div class="rowb"><button id="pDupE">⧉ 複製</button><button id="pDel" class="danger">🗑 刪除</button></div>`;
+  } else if (s.k === 'chest') {
+    const o = s.o;
+    h = `<div class="ph">🎁 寶箱</div><label class="pf"><span>內容</span><select data-k="loot">${Object.entries(LOOTS).map(([k, n]) => `<option value="${k}" ${k === o.loot ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      ${num('重新出現秒數 (0=每次遊戲一次)', 'respawn', o.respawn ?? 0, 10, 0, 3600)}${num('X', 'x', o.x)}${num('深度', 'd', o.d)}${num('旋轉 (度)', 'rot', o.rot || 0, 15, -360, 360)}
+      <div class="tip">在「🗝 探險模式」遊戲裡，靠近寶箱按 E / ✋ 打開。</div>
+      <div class="rowb"><button id="pDupE">⧉ 複製</button><button id="pDel" class="danger">🗑 刪除</button></div>`;
+  }
   el.innerHTML = h + `<div class="rowb"><button id="pDone">完成</button></div>`;
   el.querySelectorAll('input[data-k],select[data-k]').forEach(inp => inp.onchange = () => {
     const k = inp.dataset.k, v = inp.type === 'number' ? +inp.value : inp.value, o = s.o;
     if (s.k === 'room') { if (k === 'w') o.x1 = o.x0 + Math.max(.3, v); else if (k === 'dd') o.d1 = o.d0 + Math.max(.3, v); else if (k === 'x0') { const w = o.x1 - o.x0; o.x0 = v; o.x1 = v + w; } else if (k === 'd0') { const d = o.d1 - o.d0; o.d0 = v; o.d1 = v + d; } else o[k] = v; }
     else if (s.k === 'wall' && k === 'len') { const L = Math.hypot(o.x2 - o.x1, o.d2 - o.d1); const j = joinedEnds(o).filter(x => x[2] === 2); o.x2 = o.x1 + (o.x2 - o.x1) / L * v; o.d2 = o.d1 + (o.d2 - o.d1) / L * v; for (const [w2, e2] of j) { w2['x' + e2] = o.x2; w2['d' + e2] = o.d2; } }
     else if (s.k === 'stair' && k === 'floor') { o.floor = +v; }
+    else if (s.k === 'portal' && k === 'tofl') { if (v === '') o.to = null; else { const i = +v, z = i >= nF() ? allFl()[i] : null, r0 = allFl()[i].rooms[0]; o.to = { ...(z ? { zid: z.id } : { fi: i }), x: o.to?.x ?? (r0 ? (r0.x0 + r0.x1) / 2 : 1), d: o.to?.d ?? (r0 ? (r0.d0 + r0.d1) / 2 : 1) }; } }
+    else if (s.k === 'portal' && (k === 'tox' || k === 'tod')) { if (o.to) o.to[k === 'tox' ? 'x' : 'd'] = v; }
     else if (s.k === 'stair' && (k === 'w' || k === 'len')) { o[k] = clamp(v, k === 'w' ? 1.0 : 2.6, k === 'w' ? 3 : 6); }
     else if (s.k === 'op' && k === 'type') { o.type = v; if (v === 'window') { o.sill = o.sill || .9; o.h = Math.min(o.h, 1.4); } else { o.sill = 0; o.h = Math.max(o.h, 2.05); o.style = o.style || 'wood'; o.swing = o.swing || 'b'; o.hinge = o.hinge || 's'; } if (v === 'door2' || v === 'sliding') o.w = Math.max(o.w, 1.2); }
     else o[k] = v;
@@ -389,6 +487,25 @@ export function renderProps() {
   on('pRot', () => { s.o.rot = ((s.o.rot || 0) + 90) % 360; commit(); });
   const rotSt = dir => { const st = s.o, B = stairBounds(st), cx = (B.x0 + B.x1) / 2, cd = (B.d0 + B.d1) / 2; st.rot = (((st.rot || 0) + dir) % 360 + 360) % 360; const N = stairBounds({ ...st, x: 0, d: 0 }); st.x = snapV(cx - N.x1 / 2); st.d = snapV(cd - N.d1 / 2); commit(); };
   on('pStL', () => rotSt(-90)); on('pStR', () => rotSt(90)); on('pStF', () => { s.o.flip = !s.o.flip; commit(); });
+  on('pPickT', () => { P.pickTarget = s.o; toast('切換到目的樓層（上方按鈕），再點一下目的地', 3500); });
+  on('pBack', () => { const o = s.o; if (!o.to) return toast('先設定目的地'); const b = { id: nid('p'), ...(o.to.zid ? { zid: o.to.zid } : { fi: o.to.fi }), x: o.to.x + 1, d: o.to.d, rot: 0, style: o.style, name: '回程', admin: o.admin, to: { ...(o.zid ? { zid: o.zid } : { fi: o.fi || 0 }), x: o.x + 1, d: o.d } }; S.data.portals.push(b); toast('已在目的地旁邊建立回程傳送門'); commit(); });
+  on('pDupE', () => { const key = s.k === 'monster' ? 'monsters' : 'chests', c = { ...s.o, id: nid(s.k[0]), x: s.o.x + .5 }; S.data[key].push(c); P.sel = { k: s.k, o: c }; commit(); });
   on('pDup', () => { const c = { ...s.o, x: s.o.x + .3, d: s.o.d + .3 }; fl().furniture.push(c); P.sel = { k: 'furn', o: c }; commit(); });
+}
+function envProps() {
+  const el = $('#pprops'), z = P.fi >= nF() ? fl() : null, tgt = z ? (z.env || (z.env = {})) : (S.data.env || (S.data.env = {})), e = { ...DEF_ENV, ...(z ? { ...S.data.env, ...z.env } : tgt) };
+  el.innerHTML = `<div class="ph">🌤 環境設定（${z ? z.name : '地上所有樓層'}）</div>
+    <label class="pf"><span>季節</span><select data-e="season">${Object.entries(SEASONS).map(([k, n]) => `<option value="${k}" ${k === e.season ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label class="pf"><span>亮度 <b id="ebv">${(+e.bright).toFixed(1)}</b></span><input type="range" data-e="bright" min=".2" max="2.5" step=".1" value="${e.bright}"></label>
+    <label class="pf"><span>環境光顏色</span><input type="color" data-e="tint" value="${e.tint}"></label>
+    <label class="pf"><span>燈光顏色</span><input type="color" data-e="lamp" value="${e.lamp}"></label>
+    <label class="pf"><span>霧 <b id="efv">${(+e.fog).toFixed(2)}</b></span><input type="range" data-e="fog" min="0" max=".2" step=".01" value="${e.fog}"></label>
+    <label class="pf"><span>天空/背景色</span><input type="color" data-e="sky" value="${e.sky || (z ? '#050505' : '#b9d2e6')}"></label>
+    <div class="tip">${z ? '這些設定只套用在這個區域。' : '套用在 1F 以上與戶外；地下室、後室各自設定（切換到那一層再調整）。'}季節會改變天空、陽光、地面顏色，春天落花、秋天落葉、冬天下雪。</div>
+    <div class="rowb"><button id="eReset">↺ 恢復預設</button></div>`;
+  el.classList.add('show');
+  el.querySelectorAll('[data-e]').forEach(inp => inp.oninput = () => { const k = inp.dataset.e; tgt[k] = inp.type === 'range' ? +inp.value : inp.value; if (k === 'bright') $('#ebv').textContent = (+inp.value).toFixed(1); if (k === 'fog') $('#efv').textContent = (+inp.value).toFixed(2); S.save && S.save(); P.onChange && P.onChange(); });
+  el.querySelectorAll('[data-e]').forEach(inp => inp.onchange = () => pushHist());
+  $('#eReset').onclick = () => { for (const k in tgt) delete tgt[k]; commit(); envProps(); };
 }
 hintTool();

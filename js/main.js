@@ -2,15 +2,15 @@
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, PRESETS, presetColor, tex, DEG, clamp } from './core.js';
 import { CAT } from './catalog.js';
 import { defaultHouse, migrate } from './data.js';
-import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH } from './house.js';
+import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH, allFl, entFi, nearPortal } from './house.js';
 import { player, input, on, fx, updatePlayer, requestLock, releaseLock, locked } from './controls.js';
 import { openPlan, closePlan, Plan } from './plan.js';
-import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion } from './games.js';
+import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion, advInteract, advHint } from './games.js';
 
 // ---------- save / load ----------
 const KEY = 'home3d_design_v2';
 S.save = () => { try { localStorage.setItem(KEY, JSON.stringify(S.data)); } catch (e) { } };
-function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) { const before = d.defaultRev || 0, m = migrate(d); if (before !== m.defaultRev) setTimeout(() => toast('已套用你的新 1F 設計'), 1500); return m; } } catch (e) { } return defaultHouse(); }
+function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) { const before = d.defaultRev || 0, m = migrate(d); if (before !== m.defaultRev) setTimeout(() => toast(before < 2 ? '已套用你的新 1F 設計' : '已加入地下室、下水道與馬路物件'), 1500); return m; } } catch (e) { } return defaultHouse(); }
 S.data = load(); S.save();
 let dirty = false;
 function rebuild() { build(S.data); dirty = false; }
@@ -20,7 +20,7 @@ rebuild();
 const MODE_TAG = { visit: '🚶 參觀', edit: '🛋 改裝潢', game: '' };
 function setMode(m, opt) {
   const prev = S.mode;
-  if (prev === 'plan' && m !== 'plan') { closePlan(); if (dirty) rebuild(); }
+  if (prev === 'plan' && m !== 'plan') { closePlan(); S.admin = false; if (dirty) { rebuild(); renderFloorBtns(); } }
   if (prev === 'game' && m !== 'game') { stopGame(); rebuild(); }
   S.mode = m;
   document.body.dataset.mode = m;
@@ -31,13 +31,18 @@ function setMode(m, opt) {
   if (m !== 'edit') selectFurn(null);
   input.look = m !== 'plan' && m !== 'menu';
   if (m === 'visit' || m === 'game') requestLock(); else releaseLock();
-  if (m === 'plan') { Plan.fi = floorOf(player.pos.y); openPlan(); }
+  if (m === 'plan') { S.admin = opt === 'admin'; Plan.fi = floorOf(player.pos.y); openPlan(); }
   if (m === 'game') { startGame(opt, S.data); if (isTouch && innerHeight > innerWidth) setTimeout(() => toast('📱 建議把手機橫放來玩'), 2600); }
   if (m === 'menu') updateMenu();
 }
 Plan.onChange = () => { dirty = true; };
 on.escape = (to) => { if (to === 'menu' || S.mode === 'visit' || S.mode === 'game') setMode('menu'); };
 document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { Snd.init(); const [m, o] = b.dataset.go.split(':'); setMode(m, o); });
+$('#btnAdmin').onclick = () => {
+  let ok = false; try { ok = sessionStorage.getItem('home3d_admin') === '1'; } catch (e) { }
+  if (!ok) { const pw = prompt('🔐 管理員密碼'); if (pw === null) return; if (pw.trim() !== '3') return toast('密碼錯誤'); try { sessionStorage.setItem('home3d_admin', '1'); } catch (e) { } }
+  setMode('plan', 'admin'); toast('🔐 已進入管理員遊戲編輯');
+};
 $('#pauseBtn').onclick = () => setMode('menu');
 $('#pDone2').onclick = () => setMode('visit');
 function updateMenu() {
@@ -46,6 +51,7 @@ function updateMenu() {
   $('#prog-clean').textContent = c.level ? `第 ${c.level} 關 · $${c.money}` : '新遊戲';
   $('#prog-ghost').textContent = gh.level ? `第 ${gh.level} 關 · $${gh.money}` : '新遊戲';
   $('#prog-destroy').textContent = d.money != null ? `$${d.money}` : '新遊戲';
+  const a = g('adventure'); $('#prog-adventure').textContent = a.money != null ? `$${a.money}` : '新遊戲';
 }
 on.key = e => {
   if (e.code === 'Escape' && (S.mode === 'edit' || S.mode === 'plan')) { if (S.mode === 'edit' && sel) { selectFurn(null); return; } if (S.mode === 'plan') return; setMode('menu'); }
@@ -68,14 +74,35 @@ function aim() {
   const hit = ray.intersectObjects(objs, true)[0]; ray.far = Infinity;
   if (!hit) return null; const u = hit.object.userData; return u.door ? { door: u.door } : u.lamp ? { lamp: u.lamp } : null;
 }
-function interact() { const a = aim(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
+function interact() { if (S.mode === 'game' && advInteract()) return; const pt = nearPortal(player.pos); if (pt && !autoPortal(pt.p)) return usePortal(pt.p); const a = aim(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
 on.interact = interact; on.heal = usePotion; $('#potions').onclick = () => usePotion();
 $('#btnNight').onclick = () => setNight(!S.night);
+// ---------- portals ----------
+const autoPortal = p => p.style === 'portal' || p.style === 'door';
+let portalCD = 0, portalArmed = true;
+function usePortal(p) {
+  if (!p.to) return toast('這個傳送門還沒有設定目的地');
+  const fi = entFi(p.to); if (fi < 0 || !allFl()[fi]) return toast('目的地不存在了');
+  const f = $('#flash'); f.style.background = autoPortal(p) ? 'rgba(160,110,255,.7)' : 'rgba(0,0,0,.85)'; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 250);
+  Snd.init(); if (autoPortal(p)) { Snd.tone(300, .5, 'sine', .2, 1200); Snd.tone(450, .5, 'triangle', .1, 1500, .1); } else Snd.tone(160, .15, 'square', .08);
+  player.pos.set(p.to.x, floorY(fi) + .05, -p.to.d); player.vy = 0; portalCD = 1.2; portalArmed = false;
+  toast('📍 ' + allFl()[fi].name);
+}
+function updatePortals(dt) {
+  portalCD -= dt; const pt = nearPortal(player.pos, .75);
+  if (!pt) { portalArmed = true; return; }
+  if (portalArmed && portalCD <= 0 && autoPortal(pt.p)) usePortal(pt.p);
+}
 function renderFloorBtns() {
-  $('#floorbtns').innerHTML = S.data.floors.map((f, i) => `<button data-fl="${i}">${f.name}</button>`).join('');
+  const fls = allFl();
+  $('#floorbtns').innerHTML = fls.map((f, i) => f.admin ? '' : `<button data-fl="${i}">${f.name.split(' ')[0]}</button>`).join('');
   $('#floorbtns').querySelectorAll('[data-fl]').forEach(b => b.onclick = () => teleport(+b.dataset.fl));
 }
 function teleport(fi) {
+  if (fi >= S.data.floors.length) {
+    const z = allFl()[fi], pt = (S.data.portals || []).find(p => p.to && entFi(p.to) === fi && !p.admin), r = z.rooms[0];
+    const [x, d] = pt ? [pt.to.x, pt.to.d] : [(r.x0 + r.x1) / 2, (r.d0 + r.d1) / 2]; player.pos.set(x, floorY(fi) + .05, -d); player.vy = 0; portalArmed = false; toast('📍 ' + z.name); return;
+  }
   const st = S.data.stairs.find(s => s.floor === fi - 1) || S.data.stairs.find(s => s.floor === fi);
   if (fi === 0) { player.pos.set(2.9, 0, 2.4); player.yaw = 0; }
   else if (st) { const g = stairGeom(st), [ax, ad] = st.floor === fi - 1 ? g.arrive : g.start; player.pos.set(ax, floorY(fi) + .05, -ad); }
@@ -169,7 +196,7 @@ cvs.addEventListener('contextmenu', e => e.preventDefault());
 // file ops
 $('#btnExport').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S.data)], { type: 'application/json' })); a.download = '我家設計.json'; a.click(); };
 $('#btnImport').onclick = () => $('#fileIn').click();
-$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; d.defaultRev = Math.max(d.defaultRev || 0, 2); S.data = d; S.save(); rebuild(); renderFloorBtns(); toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
+$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; d.defaultRev = Math.max(d.defaultRev || 0, 2); S.data = migrate(d); S.save(); rebuild(); renderFloorBtns(); toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
 $('#btnReset').onclick = () => { if (confirm('還原成依影片建立的原始格局？目前的設計會被覆蓋（建議先匯出備份）。')) { S.data = defaultHouse(); S.save(); rebuild(); renderFloorBtns(); Plan.hist = []; toast('已還原'); } };
 $('#btnShot').onclick = () => { renderer.render(scene, camera); const a = document.createElement('a'); a.href = cvs.toDataURL('image/png'); a.download = '我家截圖.png'; a.click(); };
 $('#btnFull').onclick = () => { const d = document.documentElement; if (!document.fullscreenElement) (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); else document.exitFullscreen?.(); };
@@ -184,15 +211,19 @@ function loop() {
   const canMove = S.mode === 'visit' || S.mode === 'edit' || (S.mode === 'game' && !Game.paused);
   updatePlayer(dt, t, canMove && !dragging);
   updateHouse(dt, t);
+  if (S.mode === 'visit' || S.mode === 'game') updatePortals(dt);
   updateGame(dt);
   if (selBox.visible && sel) selBox.box.copy(sel.box);
   hintT -= dt;
   if (hintT <= 0 && (S.mode === 'visit' || S.mode === 'game')) {
     hintT = .15; const a = aim(), h = $('#hint');
-    if (a?.door) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${a.door.open ? '關' : '開'}${a.door.name}`; h.style.display = 'block'; }
+    const pt = nearPortal(player.pos), ah = S.mode === 'game' && advHint();
+    if (ah) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${ah}`; h.style.display = 'block'; }
+    else if (pt && !autoPortal(pt.p)) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${pt.p.name || '進入'}`; h.style.display = 'block'; }
+    else if (a?.door) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${a.door.open ? '關' : '開'}${a.door.name}`; h.style.display = 'block'; }
     else if (a?.lamp && S.mode === 'visit') { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${a.lamp.on ? '關' : '開'}${a.lamp.name}`; h.style.display = 'block'; }
     else h.style.display = 'none';
-    $('#flname').textContent = S.data.floors[floorOf(player.pos.y)]?.name || '';
+    $('#flname').textContent = allFl()[floorOf(player.pos.y)]?.name || '';
   }
   renderer.render(scene, camera);
 }

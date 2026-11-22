@@ -1,5 +1,6 @@
 import { F1_DEFAULT, F1_STAIRS } from './f1_default.js';
-export const DEFAULT_REV = 2;
+import { addDefaultZones } from './zones.js';
+export const DEFAULT_REV = 3;
 // default house data (estimated from home1F.mp4 and "home2f 3f.mp4")
 // plan coords: x = 0 (left) .. 5 (right), d = depth from the 1F front door (negative = towards street)
 // wall side a = left of the direction (x1,d1)->(x2,d2) when looking down at the plan with d pointing down... see house.js
@@ -114,18 +115,22 @@ export function defaultHouse() {
       F('shelf_rack', 0.3, 14.0, 90), F('shelf_rack', 0.3, 15.2, 90), F('boxes', 2.0, 16.0), F('clutter', 3.5, 15.7), F('boxes', 4.5, 15.5), F('clutter', 1.5, 13.4),
     ],
   };
-  return {
+  return addDefaultZones({
     version: 2, defaultRev: DEFAULT_REV,
     floors: [JSON.parse(JSON.stringify(F1_DEFAULT)), f2, f3],   // 1F = the user's own design (我家設計.json)
     stairs: [...JSON.parse(JSON.stringify(F1_STAIRS)), { id: 'st2', floor: 1, x: 3.2, d: 9, w: 1.8, len: 3.5 }],
     nextId: Math.max(uid + 1, 200),
-  };
+  });
 }
 // bring an older saved design up to the new default 1F (2F/3F and games untouched)
 export function migrate(d) {
   if ((d.defaultRev || 0) >= DEFAULT_REV) return d;
-  d.floors[0] = JSON.parse(JSON.stringify(F1_DEFAULT));
-  d.stairs = [...JSON.parse(JSON.stringify(F1_STAIRS)), ...d.stairs.filter(s => s.floor !== 0)];
-  d.nextId = Math.max(d.nextId || 0, 200); d.defaultRev = DEFAULT_REV;
+  if ((d.defaultRev || 0) < 2) {
+    d.floors[0] = JSON.parse(JSON.stringify(F1_DEFAULT));
+    d.stairs = [...JSON.parse(JSON.stringify(F1_STAIRS)), ...d.stairs.filter(s => s.floor !== 0)];
+  }
+  d.nextId = Math.max(d.nextId || 0, 200);
+  addDefaultZones(d); // rev 3: basement, sewer, backrooms, street props
+  d.defaultRev = DEFAULT_REV;
   return d;
 }

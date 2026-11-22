@@ -3,7 +3,13 @@ import { THREE, mergeGeometries, S, scene, camera, M, P, presetColor, BG, bx, cy
 import { CAT, buildFurniture } from './catalog.js';
 
 export const FH = 3.2, CH = 3.0, T = 0.12;
-export const floorY = i => i * FH;
+let dataRef = null;
+// unified floor list: normal floors first, then zones (basement, sewer, backrooms) which sit at their own height
+export const allFl = (d = dataRef || S.data) => d ? [...d.floors, ...(d.zones || [])] : [];
+export const zoneIdx = (d, zid) => { const k = (d.zones || []).findIndex(z => z.id === zid); return k < 0 ? -1 : d.floors.length + k; };
+export const entFi = (e, d = dataRef || S.data) => e.zid ? zoneIdx(d, e.zid) : (e.fi || 0);
+export const zoneOf = (fi, d = dataRef || S.data) => d && fi >= d.floors.length ? d.zones[fi - d.floors.length] : null;
+export const floorY = i => { const d = dataRef || S.data, n = d ? d.floors.length : 99; return i < n ? i * FH : (d.zones?.[i - n]?.y ?? 0); };
 export const H = {
   root: new THREE.Group(), floors: [], segs: [], steps: [], solids: [], cells: [], doors: [], lamps: [], surf: {},
   furn: [], breakables: [], wallMeshes: [], blockMeshes: [], slabMeshes: [], destruct: false, totalBlocks: 0, brokenBlocks: 0,
@@ -18,10 +24,50 @@ export const amb = new THREE.AmbientLight('#ffffff', 0.35); scene.add(amb);
 export const sun = new THREE.DirectionalLight('#fff4e0', 1.6); sun.position.set(-6, 20, 14); scene.add(sun);
 const POOL = matchMedia('(pointer: coarse)').matches ? 4 : 6;
 const pool = []; for (let i = 0; i < POOL; i++) { const L = new THREE.PointLight('#fff1dc', 0, 0, 1.6); scene.add(L); pool.push(L); }
-export const lightCfg = { intensity: 8, flicker: 0 };
-export function setNight(v) {
-  S.night = v; scene.background.set(v ? '#0b1020' : '#b9d2e6');
-  hemi.intensity = v ? .1 : 1.0; amb.intensity = v ? .04 : .35; sun.intensity = v ? 0 : 1.6;
+export const lightCfg = { intensity: 8, flicker: 0, mult: 1, lockFog: false };
+export function setNight(v) { S.night = v; applyEnv(true); }
+
+// ---------- environment (season / brightness / colour), set by the admin ----------
+export const DEF_ENV = { season: 'none', bright: 1, tint: '#ffffff', lamp: '#fff1dc', fog: 0, sky: '' };
+export const SEASONS = { none: '一般', spring: '春天 🌸', summer: '夏天 ☀️', autumn: '秋天 🍁', winter: '冬天 ❄️' };
+const SEASON = {
+  none: { sky: '#b9d2e6', sun: '#fff4e0', ground: '#6f7a62' }, spring: { sky: '#cfe6f3', sun: '#fff0f2', ground: '#86ad6a', p: '#ffc4dc', ps: .07 },
+  summer: { sky: '#86c3f2', sun: '#fff1c4', ground: '#5d8f42', sunI: 1.35 }, autumn: { sky: '#dccbaa', sun: '#ffc68a', ground: '#9c7b45', p: '#d9792a', ps: .1 },
+  winter: { sky: '#d6dee7', sun: '#e8f0ff', ground: '#e9eef2', p: '#ffffff', ps: .06, sunI: .8 },
+};
+let envKey = '', curSeason = SEASON.none, underground = false;
+const extMat = { ground: new THREE.MeshStandardMaterial({ color: '#6f7a62', roughness: 1 }) };
+export function envFor(fi) { const d = dataRef || S.data, z = zoneOf(fi, d); return { ...DEF_ENV, ...(d?.env || {}), ...(z?.env || {}), zone: z }; }
+export function applyEnv(force) {
+  const d = dataRef; if (!d) return;
+  const fi = floorOf(camera.position.y - 1.5), e = envFor(fi), z = e.zone;
+  const k = JSON.stringify(e) + S.night + lightCfg.lockFog; if (!force && k === envKey) return; envKey = k;
+  const se = SEASON[e.season] || SEASON.none, b = +e.bright || 1; curSeason = se; underground = !!z;
+  scene.background.set(z ? (e.sky || '#050505') : S.night ? '#0b1020' : (e.sky || se.sky));
+  hemi.color.set(e.tint); hemi.intensity = (S.night ? .1 : z ? .5 : 1.0) * b; amb.color.set(e.tint); amb.intensity = (S.night ? .04 : .35) * b;
+  sun.intensity = (S.night || z ? 0 : 1.6 * (se.sunI || 1)) * b; sun.color.set(se.sun);
+  for (const L of pool) L.color.set(e.lamp); lightCfg.mult = b;
+  extMat.ground.color.set(se.ground);
+  if (!lightCfg.lockFog) scene.fog = +e.fog > 0 ? new THREE.FogExp2(scene.background.clone(), +e.fog) : null;
+}
+// falling petals / leaves / snow around the camera (never inside the house footprint)
+const PN = 700, pPos = new Float32Array(PN * 3), pGeo = new THREE.BufferGeometry(); pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+const pMat = new THREE.PointsMaterial({ size: .07, color: '#fff', transparent: true, opacity: .9, depthWrite: false });
+const flakes = new THREE.Points(pGeo, pMat); flakes.frustumCulled = false; flakes.visible = false; scene.add(flakes);
+for (let i = 0; i < PN; i++) { pPos[i * 3] = (Math.random() - .5) * 30; pPos[i * 3 + 1] = Math.random() * 12; pPos[i * 3 + 2] = (Math.random() - .5) * 30; }
+let houseRect = { x0: 0, x1: 5, d0: -3.2, d1: 16.5 };
+const fy = new Float32Array(PN); for (let i = 0; i < PN; i++) fy[i] = Math.random() * 12;
+function updateFlakes(dt, t) {
+  const se = curSeason, on = !!se.p && !underground && camera.position.y > -1; flakes.visible = on; if (!on) return;
+  pMat.color.set(se.p); pMat.size = se.ps; const cp = camera.position, fall = se === SEASON.winter ? .9 : se === SEASON.spring ? .6 : 1.1, R = houseRect;
+  for (let i = 0; i < PN; i++) {
+    let x = pPos[i * 3], y = fy[i], z = pPos[i * 3 + 2];
+    y -= fall * dt * (.6 + (i % 7) / 10); x += Math.sin(t * .8 + i) * dt * .4;
+    if (y < 0 || Math.abs(x - cp.x) > 15 || Math.abs(z - cp.z) > 15) { x = cp.x + (Math.random() - .5) * 30; z = cp.z + (Math.random() - .5) * 30; y = 4 + Math.random() * 8; }
+    const inside = x > R.x0 - .1 && x < R.x1 + .1 && -z > R.d0 - .1 && -z < R.d1 + .1;
+    fy[i] = y; pPos[i * 3] = x; pPos[i * 3 + 1] = inside ? -1000 : y; pPos[i * 3 + 2] = z;
+  }
+  pGeo.attributes.position.needsUpdate = true;
 }
 
 // ---------- stairs ----------
@@ -76,29 +122,36 @@ function addSeg(ax, ad, bx_, bd, y0, y1, half, extra = {}) {
 }
 
 // ---------- build ----------
-let dataRef = null;
 export function build(data, opts = {}) {
   dataRef = data;
   for (const c of H.root.children.slice()) { H.root.remove(c); c.traverse(o => { if (o.geometry && o.userData.own) o.geometry.dispose(); }); }
-  Object.assign(H, { floors: [], segs: [], steps: [], solids: [], cells: [], doors: [], lamps: [], surf: {}, furn: [], breakables: [], wallMeshes: [], blockMeshes: [], slabMeshes: [], totalBlocks: 0, brokenBlocks: 0 });
+  Object.assign(H, { floors: [], segs: [], steps: [], solids: [], cells: [], doors: [], lamps: [], surf: {}, furn: [], breakables: [], wallMeshes: [], blockMeshes: [], slabMeshes: [], portals: [], totalBlocks: 0, brokenBlocks: 0 });
   H.destruct = !!opts.destruct;
-  const nF = data.floors.length, holes = data.floors.map(() => []);
-  for (const st of data.stairs) if (holes[st.floor + 1]) holes[st.floor + 1].push(...stairGeom(st).holes);
-  data.floors.forEach((fl, fi) => {
+  const nF = data.floors.length, all = allFl(data), holes = all.map(() => []);
+  for (const st of data.stairs) if (st.floor + 1 < nF) holes[st.floor + 1].push(...stairGeom(st).holes);
+  all.forEach((fl, fi) => {
     const g = new THREE.Group(); g.userData.fi = fi; H.root.add(g); H.floors.push(g);
-    const Y = floorY(fi);
+    const Y = floorY(fi), zone = fi >= nF;
     for (const r of fl.rooms) buildSlab(g, fi, r, holes[fi], Y);
-    if (fi === nF - 1) for (const r of fl.rooms) buildRoof(g, r, Y + CH);
+    if (fi === nF - 1 || zone) for (const r of fl.rooms) buildRoof(g, r, Y + CH);
     for (const w of fl.walls) buildWall(g, fi, w, Y);
     for (const f of fl.furniture) spawnFurniture(f, fi);
-    for (const r of fl.rooms) { const area = (r.x1 - r.x0) * (r.d1 - r.d0); if (area >= 1.2) addLamp(g, (r.x0 + r.x1) / 2, Y + CH - .03, -(r.d0 + r.d1) / 2, r.name); }
+    for (const r of fl.rooms) {
+      const area = (r.x1 - r.x0) * (r.d1 - r.d0);
+      if (zone && area > 20) { // big zone rooms (backrooms, sewer): a grid of ceiling lights
+        const nx = Math.max(1, Math.round((r.x1 - r.x0) / 5)), nd = Math.max(1, Math.round((r.d1 - r.d0) / 5));
+        for (let i = 0; i < nx; i++) for (let j = 0; j < nd; j++) addLamp(g, r.x0 + (i + .5) * (r.x1 - r.x0) / nx, Y + CH - .03, -(r.d0 + (j + .5) * (r.d1 - r.d0) / nd), r.name, fl.kind === 'backroom');
+      } else if (area >= 1.2) addLamp(g, (r.x0 + r.x1) / 2, Y + CH - .03, -(r.d0 + r.d1) / 2, r.name);
+    }
   });
   for (const st of data.stairs) if (H.floors[st.floor]) buildStairs(H.floors[st.floor], st);
+  for (const p of data.portals || []) buildPortal(p);
   // ground everywhere outside
   H.cells.push({ x0: -60, x1: 60, z0: -60, z1: 60, y: 0 });
-  addBoundarySegs();
+  buildExterior(data);
   H._furnTotal = H.furn.length;
   refreshSolids();
+  applyEnv(true);
 }
 function buildSlab(g, fi, r, holes, Y) {
   for (const c of rectCells(r, holes)) {
@@ -277,9 +330,9 @@ function buildStairs(g, st) {
     for (const [[x1, d1], [x2, d2]] of G.guards) { const L = Math.hypot(x2 - x1, d2 - d1); if (L > .1) buildRail(g2, { x1, d1, x2, d2 }, Y2, L, (x2 - x1) / L, (d2 - d1) / L, Math.atan2(d2 - d1, x2 - x1)); }
   }
 }
-function addLamp(g, x, y, z, name) {
-  const lm = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e0', emissiveIntensity: 1.2 });
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.06, 20), lm); m.userData.own = 1; m.position.set(x, y, z); g.add(m);
+function addLamp(g, x, y, z, name, panel) {
+  const lm = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: panel ? '#fff8d0' : '#fff6e0', emissiveIntensity: 1.2 });
+  const m = new THREE.Mesh(panel ? new THREE.BoxGeometry(1.2, .04, .6) : new THREE.CylinderGeometry(0.22, 0.25, 0.06, 20), lm); m.userData.own = 1; m.position.set(x, y, z); g.add(m);
   const l = { x, y, z, mesh: m, mat: lm, on: true, name: name + '燈' }; m.userData.lamp = l; H.lamps.push(l);
 }
 export function setLamp(l, on) { l.on = on; l.mat.emissiveIntensity = on ? 1.2 : 0; }
@@ -292,7 +345,7 @@ export function spawnFurniture(f, fi) {
   H.floors[fi].add(obj);
   const e = { kind: 'furn', f, fi, obj, nc: !!d.nc, box: new THREE.Box3(), hp: 0, max: 0, color: f.color || d.c, value: 0 };
   obj.traverse(o => o.userData.furn = e);
-  e.spin = obj.getObjectByName('spin');
+  e.spin = obj.getObjectByName('spin'); e.spinY = obj.getObjectByName('spinY');
   refreshFurnBox(e);
   const v = (e.box.max.x - e.box.min.x) * (e.box.max.y - e.box.min.y) * (e.box.max.z - e.box.min.z);
   e.hp = e.max = Math.round(30 + v * 120); e.value = Math.round(15 + v * 60);
@@ -360,11 +413,15 @@ export function groundAt(x, z, feet) {
   for (const c of H.solids) if (c.max.y <= lim && c.max.y > g && x > c.min.x - .1 && x < c.max.x + .1 && z > c.min.z - .1 && z < c.max.z + .1) g = c.max.y;
   return g;
 }
-export const floorOf = y => clamp(Math.floor((y + .6) / FH), 0, Math.max(0, H.floors.length - 1));
+export const floorOf = y => {
+  const d = dataRef || S.data;
+  if (d && y < -1 && d.zones?.length) { let best = -1, by = -1e9; d.zones.forEach((z, k) => { if (z.y <= y + .6 && z.y > by) { by = z.y; best = k; } }); if (best >= 0) return d.floors.length + best; }
+  return clamp(Math.floor((y + .6) / FH), 0, Math.max(0, (d ? d.floors.length : H.floors.length) - 1));
+};
 
 // ---------- surfaces (paint) ----------
 export function paintSurface(key, preset) {
-  const p = key.split(':'), fl = dataRef.floors[+p[1]];
+  const p = key.split(':'), fl = allFl(dataRef)[+p[1]];
   if (p[0] === 'w') { const w = fl.walls.find(w => w.id === p[2]); if (w) w[p[3]] = preset; }
   else if (p[0] === 'r') { const r = fl.rooms.find(r => r.id === p[2]); if (r) r.floor = preset; }
   for (const { mesh, idx } of H.surf[key] || []) mesh.material[idx] = P(preset);
@@ -428,36 +485,88 @@ export function updateHouse(dt, t) {
     d.t += ((d.open ? 1 : 0) - d.t) * Math.min(1, dt * 5);
     if (d.kind === 'hinge') d.pivot.rotation.y = d.base + d.delta * d.t; else d.update();
   }
-  for (const e of H.furn) if (e.spin) e.spin.rotation.z += dt * 12;
+  for (const e of H.furn) { if (e.spin) e.spin.rotation.z += dt * 12; if (e.spinY) e.spinY.rotation.y += dt * 6; }
   poolT -= dt;
   if (poolT <= 0) {
     poolT = .25;
     const cp = camera.position;
     const lit = H.lamps.filter(l => l.on).map(l => [l, (l.x - cp.x) ** 2 + (l.z - cp.z) ** 2 + ((l.y - cp.y) * 2.5) ** 2]).sort((a, b) => a[1] - b[1]);
-    pool.forEach((L, i) => { const e = lit[i]; if (e) { L.position.set(e[0].x, e[0].y - .25, e[0].z); L.intensity = lightCfg.intensity; } else L.intensity = 0; });
+    pool.forEach((L, i) => { const e = lit[i]; if (e) { L.position.set(e[0].x, e[0].y - .25, e[0].z); L.intensity = lightCfg.intensity * lightCfg.mult; } else L.intensity = 0; });
+    applyEnv();
   }
-  if (lightCfg.flicker > 0) pool.forEach(L => { if (L.intensity > 0) L.intensity = lightCfg.intensity * (Math.random() < lightCfg.flicker ? .05 : 1); });
+  if (lightCfg.flicker > 0) pool.forEach(L => { if (L.intensity > 0) L.intensity = lightCfg.intensity * lightCfg.mult * (Math.random() < lightCfg.flicker ? .05 : 1); });
+  for (const p of H.portals) if (p.spin) { p.spin.rotation.z += dt * 2.5; p.spin.material.emissiveIntensity = 1.2 + Math.sin(t * 4) * .4; }
+  updateFlakes(dt, t);
 }
 export function toggleDoor(d) { d.open = !d.open; if (d.pair) d.pair.open = d.open; }
 
-// ---------- exterior (built once) ----------
-export const exterior = new THREE.Group(); scene.add(exterior);
-{
-  const fm = P('facade');
-  bx(exterior, 0.45, 3.0, 0.45, 0.22, 0, 3.0, fm); bx(exterior, 0.45, 3.0, 0.45, 4.78, 0, 3.0, fm);
-  bx(exterior, 5, 0.3, 0.3, 2.5, 2.7, 0.2, M('#b8bcc0', { m: .5, r: .4 }));
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(80, 16), M('#4a4c50', { r: .95 })); road.rotation.x = -Math.PI / 2; road.position.set(2.5, -0.02, 11.2); exterior.add(road);
-  const walk = new THREE.Mesh(new THREE.PlaneGeometry(80, 0.2), M('#ffffff')); walk.rotation.x = -Math.PI / 2; walk.position.set(2.5, -0.01, 8); exterior.add(walk);
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(80, 60), M('#6f7a62', { r: 1 })); back.rotation.x = -Math.PI / 2; back.position.set(2.5, -0.03, -30); exterior.add(back);
-  const nb = [['#c9b8a0', -3.1, 10.2], ['#a9b6c2', 8.1, 11.5], ['#d6c7b5', -9.3, 9.6], ['#b6a79e', 14.3, 12.8]];
-  for (const [c, x, h] of nb) {
-    bx(exterior, 6.2, h, 20, x, 0, -6.6, M(c, { r: .9 }));
-    for (const y of [3.8, 7.0]) bx(exterior, 3, 1.3, 0.06, x, y, 3.42, M('#5d7a90', { r: .2, m: .3 }));
-    bx(exterior, 4, 2.4, 0.06, x, 0, 3.42, M('#8e9499', { m: .5, r: .4 }));
+// ---------- portals (teleport points: manhole, hatch, ladder, magic portal) ----------
+export const PORTAL_STYLES = { portal: '🌀 傳送門', manhole: '⚫ 人孔蓋', hatch: '🟫 地板活門', ladder: '🪜 梯子', door: '🚪 神秘門' };
+function buildPortal(p) {
+  const fi = entFi(p, dataRef), g = H.floors[fi]; if (!g || fi < 0) return;
+  const Y = floorY(fi), o = new THREE.Group(); o.position.set(p.x, Y, -p.d); o.rotation.y = (p.rot || 0) * DEG; g.add(o);
+  let spin = null; const metal = M('#3a3d40', { m: .7, r: .4 });
+  if (p.style === 'manhole') { cy(o, .42, .42, .03, 0, 0, 0, metal, 24); cy(o, .34, .34, .035, 0, 0, 0, M('#2a2c2e', { m: .6, r: .5 }), 24); for (let i = -2; i <= 2; i++) bx(o, .5, .04, .03, 0, .01, i * .12, M('#4a4d50', { m: .6 })); }
+  else if (p.style === 'hatch') { bx(o, 1.0, .04, 1.0, 0, 0, 0, M('#5a3a22', { r: .6 })); bx(o, .9, .045, .06, 0, 0, -.3, M('#3a2414')); bx(o, .9, .045, .06, 0, 0, .3, M('#3a2414')); cy(o, .05, .05, .05, .3, .03, 0, M('#c9a23a', { m: .8 })); }
+  else if (p.style === 'ladder') { const st = M('#8a8f94', { m: .7, r: .35 }); for (const x of [-.22, .22]) bx(o, .05, 2.9, .05, x, 0, 0, st); for (let i = 1; i < 10; i++) bx(o, .44, .03, .03, 0, i * .29, 0, st); }
+  else if (p.style === 'door') { bx(o, 1.0, 2.2, .12, 0, 0, 0, M('#1a1a22')); const pm = new THREE.Mesh(new THREE.PlaneGeometry(.86, 2.05), M('#6a3cff', { e: '#7a4cff', ei: 1.2, op: .85 })); pm.position.set(0, 1.05, .07); o.add(pm); }
+  else { // magic portal: glowing ring with a swirling disc
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(.75, .07, 10, 40), M('#b48cff', { e: '#9a6cff', ei: 1.5 })); ring.position.y = 1.05; o.add(ring);
+    spin = new THREE.Mesh(new THREE.CircleGeometry(.7, 32), new THREE.MeshStandardMaterial({ map: swirlTex(), emissive: '#7a4cff', emissiveIntensity: 1.2, emissiveMap: swirlTex(), transparent: true, opacity: .85, side: THREE.DoubleSide, depthWrite: false }));
+    spin.position.y = 1.05; o.add(spin);
   }
-  const bnd = [[2.5, 1.5, 6.2, 20, 3, .1], [-0.06, 1.5, 4.7, .1, 3, 3], [5.06, 1.5, 4.7, .1, 3, 3]];
-  for (const [x, y, z, w, h, d] of bnd) H._bounds = (H._bounds || []).concat([[x, z, w, d]]);
+  H.portals.push({ p, fi, obj: o, spin, x: p.x, z: -p.d, y: Y });
 }
-export function addBoundarySegs() {
-  addSeg(-7, -6.2, 12, -6.2, 0, 50, .05); addSeg(-0.06, -3.2, -0.06, -6.2, 0, 50, .05); addSeg(5.06, -3.2, 5.06, -6.2, 0, 50, .05);
+let swirl = null;
+function swirlTex() {
+  if (swirl) return swirl; const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 4, 64, 64, 64); gr.addColorStop(0, '#ffffff'); gr.addColorStop(.4, '#b48cff'); gr.addColorStop(1, '#2a0a5a'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 3; for (let k = 0; k < 4; k++) { g.beginPath(); for (let a = 0; a < 12; a += .1) { const r = a * 5; g.lineTo(64 + Math.cos(a + k * 1.57) * r, 64 + Math.sin(a + k * 1.57) * r); } g.stroke(); }
+  return swirl = new THREE.CanvasTexture(c);
 }
+export function nearPortal(pos, r = 1.2) {
+  let best = null, bd = r;
+  for (const p of H.portals) { if (Math.abs(p.y - pos.y) > 1.2) continue; const d = Math.hypot(p.x - pos.x, p.z - pos.z); if (d < bd) { bd = d; best = p; } }
+  return best;
+}
+
+// ---------- exterior: street, neighbours and boundary, fitted to the house footprint ----------
+export const exterior = new THREE.Group(); scene.add(exterior);
+function footprintOf(data) {
+  let x0 = 1e9, x1 = -1e9, d0 = 1e9, d1 = -1e9;
+  for (const f of data.floors) { for (const r of f.rooms) { x0 = Math.min(x0, r.x0); x1 = Math.max(x1, r.x1); d0 = Math.min(d0, r.d0); d1 = Math.max(d1, r.d1); } for (const w of f.walls) { x0 = Math.min(x0, w.x1, w.x2); x1 = Math.max(x1, w.x1, w.x2); d0 = Math.min(d0, w.d1, w.d2); d1 = Math.max(d1, w.d1, w.d2); } }
+  if (x0 > x1) return { x0: 0, x1: 5, d0: -3.2, d1: 16.5 };
+  return { x0, x1, d0, d1 };
+}
+export const STREET = { front: -15.5 };
+function buildExterior(data) {
+  for (const c of exterior.children.slice()) exterior.remove(c);
+  const B = footprintOf(data), cx = (B.x0 + B.x1) / 2, front = B.d0, far = STREET.front; houseRect = B;
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(90, 40), P('asphalt')); road.rotation.x = -Math.PI / 2; road.position.set(cx, -0.02, -(front - 20)); exterior.add(road);
+  for (let x = -40; x < 40; x += 3) { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, .14), M('#f2f2f2')); m.rotation.x = -Math.PI / 2; m.position.set(cx + x, -0.01, -((front + far) / 2)); exterior.add(m); }
+  for (const dd of [front - .9, far + .9]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(90, .12), M('#ffffff')); m.rotation.x = -Math.PI / 2; m.position.set(cx, -0.01, -dd); exterior.add(m); }
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(90, 80), extMat.ground); back.rotation.x = -Math.PI / 2; back.position.set(cx, -0.03, -(B.d1 + 40)); exterior.add(back);
+  bx(exterior, 90, .12, 2.2, cx, -0.02, -(far - 1.1), P('stone'));
+  // neighbouring houses hug the footprint on both sides (never overlapping it)
+  const depth = B.d1 - front + .2, zc = -(front + depth / 2 - .1), cols = ['#c9b8a0', '#a9b6c2', '#d6c7b5', '#b6a79e', '#c2b9a8', '#aab0a0'];
+  [[B.x0 - .08, -1], [B.x1 + .08, 1]].forEach(([edge, dir], si) => {
+    let e = edge;
+    for (let k = 0; k < 3; k++) {
+      const w = 5.6 + ((k + si) % 2) * .8, h = 9.6 + ((k * 3 + si) % 4) * 1.2, x = e + dir * w / 2, c = cols[(k * 2 + si) % cols.length];
+      bx(exterior, w, h, depth, x, 0, zc, M(c, { r: .9 }));
+      for (const y of [3.8, 7.0]) bx(exterior, w * .5, 1.3, 0.06, x, y, -(front - .14), M('#5d7a90', { r: .2, m: .3 }));
+      bx(exterior, w * .7, 2.4, 0.06, x, 0, -(front - .14), M('#8e9499', { m: .5, r: .4 }));
+      e += dir * w;
+    }
+  });
+  // houses across the street
+  for (let k = -4; k <= 4; k++) { const w = 5.8, h = 8 + ((k + 8) % 3) * 1.6; bx(exterior, w - .1, h, 10, cx + k * w, 0, -(far - 2.2 - 5), M(cols[(k + 8) % cols.length], { r: .9 })); bx(exterior, w * .6, 2.4, .06, cx + k * w, 0, -(far - 2.2 + .04), M('#8e9499', { m: .5, r: .4 })); for (const y of [3.6, 6.6]) bx(exterior, w * .5, 1.2, .06, cx + k * w, y, -(far - 2.2 + .04), M('#5d7a90', { r: .2, m: .3 })); }
+  const fm = P('facade');
+  bx(exterior, 0.4, 3.0, 0.4, B.x0 + .2, 0, -(front + .2), fm); bx(exterior, 0.4, 3.0, 0.4, B.x1 - .2, 0, -(front + .2), fm);
+  // invisible boundary: neighbour fronts, the street ends and the far sidewalk
+  const L = cx - 30, Rr = cx + 30;
+  addSeg(L, front, B.x0 - .06, front, 0, 50, .05); addSeg(B.x1 + .06, front, Rr, front, 0, 50, .05);
+  addSeg(B.x0 - .1, front, B.x0 - .1, B.d1 + .1, 0, 50, .03); addSeg(B.x1 + .1, front, B.x1 + .1, B.d1 + .1, 0, 50, .03); // neighbours' side walls
+  addSeg(L, front, L, far, 0, 50, .05); addSeg(Rr, front, Rr, far, 0, 50, .05); addSeg(L, far, Rr, far, 0, 50, .05);
+}
+export function addBoundarySegs() { }
