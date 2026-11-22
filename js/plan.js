@@ -11,8 +11,11 @@ const TOOLS = [['select', '👆', '選取/移動'], ['wall', '🧱', '畫牆'], 
 const nid = p => p + (S.data.nextId++);
 const fl = () => S.data.floors[P.fi];
 const snapV = v => P.snap ? Math.round(v / .05) * .05 : Math.round(v / .01) * .01;
-const toS = (x, d) => [P.ox + x * P.s, P.oy + d * P.s];
-const toP = (sx, sy) => [(sx - P.ox) / P.s, (sy - P.oy) / P.s];
+// The plan is a true top-down view as seen when you stand at the front door facing into the house:
+// street at the bottom, walking in goes UP the screen, and the left/right walls are on the same side as in 3D.
+const F = -1; // depth axis points up the screen
+const toS = (x, d) => [P.ox + x * P.s, P.oy + F * d * P.s];
+const toP = (sx, sy) => [(sx - P.ox) / P.s, F * (sy - P.oy) / P.s];
 
 export function openPlan() {
   $('#plan').classList.add('show'); resize(); if (!P.hist.length) pushHist(); fit(); buildToolbar(); renderProps(); draw();
@@ -26,7 +29,7 @@ function fit() {
   if (pts.length) { x0 = Math.min(...pts.map(p => p[0])); x1 = Math.max(...pts.map(p => p[0])); d0 = Math.min(...pts.map(p => p[1])); d1 = Math.max(...pts.map(p => p[1])); }
   const r = cvs.getBoundingClientRect(), pad = 30;
   P.s = Math.min((r.width - pad * 2) / (x1 - x0 + 1), (r.height - pad * 2) / (d1 - d0 + 1));
-  P.ox = r.width / 2 - (x0 + x1) / 2 * P.s; P.oy = r.height / 2 - (d0 + d1) / 2 * P.s;
+  P.ox = r.width / 2 - (x0 + x1) / 2 * P.s; P.oy = r.height / 2 - F * (d0 + d1) / 2 * P.s;
 }
 function pushHist() { P.hist.push(JSON.stringify(S.data)); if (P.hist.length > 60) P.hist.shift(); P.fut = []; }
 function commit() { pushHist(); S.save && S.save(); P.onChange && P.onChange(); renderProps(); draw(); }
@@ -69,7 +72,7 @@ function draw() {
   const r = cvs.getBoundingClientRect(); ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   ctx.fillStyle = '#161a1f'; ctx.fillRect(0, 0, r.width, r.height);
   // grid
-  const [gx0, gd0] = toP(0, 0), [gx1, gd1] = toP(r.width, r.height);
+  const [qa, qb] = toP(0, 0), [qc, qd] = toP(r.width, r.height), gx0 = Math.min(qa, qc), gx1 = Math.max(qa, qc), gd0 = Math.min(qb, qd), gd1 = Math.max(qb, qd);
   const step = P.s > 60 ? .5 : 1;
   ctx.lineWidth = 1;
   for (let x = Math.floor(gx0); x <= gx1; x += step) { const [sx] = toS(x, 0); ctx.strokeStyle = x % 1 === 0 ? '#262c34' : '#1e232a'; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, r.height); ctx.stroke(); }
@@ -103,11 +106,11 @@ function draw() {
   for (const fu of f.furniture) {
     if (!CAT[fu.type]) continue;
     const fp = footprint(fu.type), [sx, sy] = toS(fu.x, fu.d);
-    ctx.save(); ctx.translate(sx, sy); ctx.rotate((fu.rot || 0) * Math.PI / 180);
+    ctx.save(); ctx.translate(sx, sy); ctx.rotate(-(fu.rot || 0) * Math.PI / 180);
     ctx.fillStyle = isSel('furn', fu) ? 'rgba(255,176,32,.6)' : 'rgba(210,170,110,.45)'; ctx.strokeStyle = isSel('furn', fu) ? '#ffb020' : 'rgba(255,230,190,.6)'; ctx.lineWidth = 1.5;
-    const x = (fp.cx - fp.w / 2) * P.s, y = (-fp.cz - fp.d / 2) * P.s;
+    const x = (fp.cx - fp.w / 2) * P.s, y = (fp.cz - fp.d / 2) * P.s;
     ctx.fillRect(x, y, fp.w * P.s, fp.d * P.s); ctx.strokeRect(x, y, fp.w * P.s, fp.d * P.s);
-    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(x, y, fp.w * P.s, 2); // front edge marker
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(x, y + fp.d * P.s - 2, fp.w * P.s, 2); // front edge marker
     ctx.restore();
     if (P.s > 45) label(CAT[fu.type].n, fu.x, fu.d, 'rgba(255,255,255,.75)', 10);
   }
@@ -131,28 +134,28 @@ function draw() {
         for (const [h, dir, lw] of leaves) {
           const hx = w.x1 + ux * h, hd = w.d1 + ud * h, ex = hx + ud * nside * lw, ed = hd - ux * nside * lw;
           ctx.beginPath(); ctx.moveTo(...toS(hx, hd)); ctx.lineTo(...toS(ex, ed)); ctx.stroke();
-          const a0 = Math.atan2(ud * dir, ux * dir), a1 = Math.atan2(-ux * nside, ud * nside);
+          const a0 = Math.atan2(F * ud * dir, ux * dir), a1 = Math.atan2(F * -ux * nside, ud * nside);
           ctx.beginPath(); const [cx, cy] = toS(hx, hd); let s0 = a0, s1 = a1; let df = s1 - s0; while (df > Math.PI) df -= 2 * Math.PI; while (df < -Math.PI) df += 2 * Math.PI;
           ctx.setLineDash([3, 3]); ctx.arc(cx, cy, lw * P.s, s0, s0 + df, df < 0); ctx.stroke(); ctx.setLineDash([]);
         }
       } else if (o.type === 'sliding') { for (const k of [-.03, .03]) { ctx.beginPath(); const off = k > 0 ? 0 : .1; ctx.moveTo(pa[0] - ud * k * P.s, pa[1] + ux * k * P.s); ctx.lineTo(pb[0] - ud * k * P.s, pb[1] + ux * k * P.s); ctx.stroke(); } }
       else { ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(...pa); ctx.lineTo(...pb); ctx.stroke(); ctx.setLineDash([]); }
     }
-    if (sel) { handle(...A); handle(...B); if (P.s > 25) label(L.toFixed(2) + 'm', (w.x1 + w.x2) / 2, (w.d1 + w.d2) / 2 - .25, '#ffb020', 11); }
+    if (sel) { handle(...A); handle(...B); if (P.s > 25) label(L.toFixed(2) + 'm', (w.x1 + w.x2) / 2, (w.d1 + w.d2) / 2 - F * .25, '#ffb020', 11); }
   }
   // room labels on top
   for (const rm of f.rooms) {
     const w = rm.x1 - rm.x0, d = rm.d1 - rm.d0;
-    label(rm.name, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 - (P.s > 30 ? .15 : 0), '#fff', 12, true);
-    if (P.s > 30) label(`${w.toFixed(2)}×${d.toFixed(2)}m`, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 + .25, 'rgba(255,255,255,.7)', 10);
+    label(rm.name, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 - F * (P.s > 30 ? .15 : 0), '#fff', 12, true);
+    if (P.s > 30) label(`${w.toFixed(2)}×${d.toFixed(2)}m`, (rm.x0 + rm.x1) / 2, (rm.d0 + rm.d1) / 2 + F * .25, 'rgba(255,255,255,.7)', 10);
     if (isSel('room', rm)) for (const [hx, hd] of roomHandles(rm)) handle(...toS(hx, hd));
   }
   // previews
   const dg = P.drag;
-  if (dg && (dg.mode === 'newwall') && dg.end) { ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, .14 * P.s); ctx.beginPath(); ctx.moveTo(...toS(...dg.start)); ctx.lineTo(...toS(...dg.end)); ctx.stroke(); label(Math.hypot(dg.end[0] - dg.start[0], dg.end[1] - dg.start[1]).toFixed(2) + 'm', (dg.start[0] + dg.end[0]) / 2, (dg.start[1] + dg.end[1]) / 2 - .3, '#ffb020'); }
+  if (dg && (dg.mode === 'newwall') && dg.end) { ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, .14 * P.s); ctx.beginPath(); ctx.moveTo(...toS(...dg.start)); ctx.lineTo(...toS(...dg.end)); ctx.stroke(); label(Math.hypot(dg.end[0] - dg.start[0], dg.end[1] - dg.start[1]).toFixed(2) + 'm', (dg.start[0] + dg.end[0]) / 2, (dg.start[1] + dg.end[1]) / 2 - F * .3, '#ffb020'); }
   if (dg && dg.mode === 'newroom' && dg.end) { const [a, b] = toS(Math.min(dg.start[0], dg.end[0]), Math.min(dg.start[1], dg.end[1])), [c, d] = toS(Math.max(dg.start[0], dg.end[0]), Math.max(dg.start[1], dg.end[1])); ctx.fillStyle = 'rgba(255,176,32,.25)'; ctx.fillRect(a, b, c - a, d - b); ctx.strokeStyle = '#ffb020'; ctx.strokeRect(a, b, c - a, d - b); }
   // compass: street side
-  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; const [sx0, sy0] = toS(2.5, -3.6); ctx.fillText('▲ 馬路（前）', sx0, sy0);
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; const [sx0, sy0] = toS(2.5, -3.75); ctx.fillText('▼ 馬路・大門（前）', sx0, sy0); const [sx1, sy1] = toS(2.5, 16.9); ctx.fillText('▲ 後面', sx1, sy1);
 }
 function label(t, x, d, c, size = 12, bold) { const [sx, sy] = toS(x, d); ctx.font = `${bold ? 'bold ' : ''}${size}px -apple-system,"PingFang TC",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(t, sx + 1, sy + 1); ctx.fillStyle = c; ctx.fillText(t, sx, sy); }
 function handle(sx, sy) { ctx.fillStyle = '#ffb020'; ctx.fillRect(sx - 6, sy - 6, 12, 12); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(sx - 6, sy - 6, 12, 12); }
@@ -312,6 +315,13 @@ function showCatalog() {
 }
 function swatchSelect(cur, name) { return `<div class="sws" data-name="${name}">${Object.entries(PRESETS).map(([id, p]) => `<button data-v="${id}" title="${p.n}" class="${id === cur ? 'on' : ''}" style="background:${presetColor(id)}"></button>`).join('')}</div>`; }
 function num(label, key, val, step = .05, min = -50, max = 50) { return `<label class="pf"><span>${label}</span><input type="number" data-k="${key}" value="${(+val).toFixed(2)}" step="${step}" min="${min}" max="${max}"></label>`; }
+// describe a wall side by the room it faces (side a normal = (ud, -ux) on the plan)
+function sideName(w, side) {
+  const L = Math.hypot(w.x2 - w.x1, w.d2 - w.d1) || 1, ux = (w.x2 - w.x1) / L, ud = (w.d2 - w.d1) / L, k = side === 'a' ? 1 : -1;
+  const px = (w.x1 + w.x2) / 2 + ud * k * .3, pd = (w.d1 + w.d2) / 2 - ux * k * .3;
+  const r = fl().rooms.filter(r => px > r.x0 && px < r.x1 && pd > r.d0 && pd < r.d1).sort((a, b) => (a.x1 - a.x0) * (a.d1 - a.d0) - (b.x1 - b.x0) * (b.d1 - b.d0))[0];
+  return `${side.toUpperCase()} 面顏色：${r ? r.name + ' 這一側' : '屋外這一側'}`;
+}
 export function renderProps() {
   const el = $('#pprops'), s = P.sel;
   if (!s) {
@@ -334,7 +344,7 @@ export function renderProps() {
     const w = s.o, L = Math.hypot(w.x2 - w.x1, w.d2 - w.d1);
     h = `<div class="ph">${w.kind === 'rail' ? '欄杆' : '牆'}</div>${num('長度 (m)', 'len', L, .05, .2)}
       <label class="pf"><span>類型</span><select data-k="kind"><option value="wall" ${w.kind !== 'rail' ? 'selected' : ''}>牆</option><option value="rail" ${w.kind === 'rail' ? 'selected' : ''}>欄杆</option></select></label>
-      ${w.kind !== 'rail' ? `<div class="grp">A 面顏色（上/右側）</div>${swatchSelect(w.a, 'a')}<div class="grp">B 面顏色（下/左側）</div>${swatchSelect(w.b, 'b')}` : ''}
+      ${w.kind !== 'rail' ? `<div class="grp">${sideName(w, 'a')}</div>${swatchSelect(w.a, 'a')}<div class="grp">${sideName(w, 'b')}</div>${swatchSelect(w.b, 'b')}` : ''}
       <div class="rowb"><button id="pAddDoor">🚪 加門</button><button id="pAddWin">🪟 加窗</button><button id="pSplit">✂️ 分割</button><button id="pDel" class="danger">🗑 刪除牆</button></div>`;
   } else if (s.k === 'op') {
     const o = s.o;
