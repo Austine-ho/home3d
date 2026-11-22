@@ -75,7 +75,8 @@ function updateMenu() {
 }
 on.key = e => {
   if (e.code === 'Escape' && (S.mode === 'edit' || S.mode === 'plan')) { if (S.mode === 'edit' && sel) { selectFurn(null); return; } if (S.mode === 'plan') return; setMode('menu'); }
-  if (e.code === 'Escape' && (S.mode === 'visit' || S.mode === 'game') && !locked()) setMode('menu');
+  if (e.code === 'Escape' && S.mode === 'visit' && !locked()) setMode('menu');
+  if (e.code === 'Escape' && S.mode === 'game' && !locked() && !document.querySelector('#dialog.show,#shop.show')) openPause();
   if (e.code === 'Tab') { if (S.mode === 'visit') setMode('edit'); else if (S.mode === 'edit') setMode('visit'); }
   if (e.code === 'KeyL' && S.mode === 'visit') setNight(!S.night);
   if (e.code === 'KeyG' && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit')) goHome();
@@ -124,6 +125,7 @@ function goHome() {
   toast('🏠 回到家了');
 }
 $('#btnHome').onclick = e => { e.stopPropagation(); goHome(); };
+on.home = goHome;
 // ---------- portals ----------
 const autoPortal = p => p.style === 'portal' || p.style === 'door';
 let portalCD = 0, portalArmed = true;

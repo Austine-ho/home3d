@@ -57,6 +57,7 @@ function buildToolbar() {
   $('#pfloors').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { P.fi = +b.dataset.f; if (!P.pickTarget) P.sel = null; buildToolbar(); renderProps(); fit(); draw(); });
   $('#pAddF').onclick = addFloor; if ($('#pAddBR')) $('#pAddBR').onclick = addBackroom;
   const tools = S.admin ? [TOOLS[0], ...ADMIN_TOOLS, ...TOOLS.slice(1)] : TOOLS;
+  $('#ptools').classList.toggle('two', !!S.admin);
   $('#ptools').innerHTML = tools.map(([id, ic, n]) => `<button data-t="${id}" class="${P.tool === id ? 'on' : ''} ${ADMIN_TOOLS.some(t => t[0] === id) ? 'adm' : ''}"><span>${ic}</span>${n}</button>`).join('');
   $('#ptools').querySelectorAll('[data-t]').forEach(b => b.onclick = () => { P.tool = b.dataset.t; if (P.tool === 'furn') showCatalog(); if (P.tool === 'env') { P.sel = null; renderProps(); } buildToolbar(); hintTool(); });
   $('#pSnap').classList.toggle('on', P.snap);

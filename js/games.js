@@ -244,6 +244,10 @@ const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer', adventure: 
 function loadProf(kind) {
   let p; try { p = JSON.parse(localStorage.getItem(PROF_KEY(kind))); } catch (e) { }
   if (!p) p = { money: kind === 'destroy' ? 200 : 0, owned: { [DEF_W[kind]]: 0 }, cur: DEF_W[kind], level: 1, hpLv: 0, spdLv: 0, defLv: 0, regLv: 0, potions: 2, best: 0 };
+  // repair damaged saves: unknown weapons dropped, always keep the starter weapon
+  p.owned = Object.fromEntries(Object.entries(p.owned || {}).filter(([id]) => WEAPONS[id]));
+  if (!Object.keys(p.owned).length) p.owned[DEF_W[kind]] = 0;
+  if (!p.owned.hasOwnProperty(p.cur)) p.cur = Object.keys(p.owned)[0];
   return p;
 }
 const maxHpOf = p => 100 + (p.hpLv || 0) * 40;
@@ -290,7 +294,7 @@ export function startGame(kind, data, opts = {}) {
   build(data, { destruct: kind === 'destroy' });
   worldTargets = kind === 'destroy' ? null : [...H.wallMeshes, ...H.slabMeshes];
   const pf = G.prof; pf.defLv ??= 0; pf.regLv ??= 0; pf.potions ??= 2;
-  G.maxHp = maxHpOf(pf); G.hp = G.maxHp; clearHearts(); player.speed = 2.4 * (1 + G.prof.spdLv * .08); player.run = 4.4 * (1 + G.prof.spdLv * .08);
+  G.maxHp = maxHpOf(pf); G.hp = G.maxHp; clearHearts(); player.speed = 4.4 * (1 + G.prof.spdLv * .08); player.run = 6.2 * (1 + G.prof.spdLv * .08);
   G.buffs = { speed: 0, power: 0, shield: 0 }; G.session = (G.session || 0) + 1; G.evT = 25; G.auto = !!opts.auto;
   vm.visible = true; buildVM(G.prof.cur);
   $('#ghud').classList.add('show'); $('#ghud').dataset.kind = kind; document.body.dataset.kind = kind;
@@ -701,7 +705,7 @@ export function openShop(betweenLevels, fromDeath) {
   buyUp('[data-pot]', potCost, () => { p.potions++; });
   buyUp('[data-def]', () => 180 * (p.defLv + 1), () => { p.defLv++; });
   buyUp('[data-reg]', () => 160 * (p.regLv + 1), () => { p.regLv++; });
-  const sd = el.querySelector('[data-spd]'); if (sd) sd.onclick = () => { const c = 200 * (p.spdLv + 1); if (p.money < c) return toast('錢不夠喔'); p.money -= c; p.spdLv++; player.speed = 2.4 * (1 + p.spdLv * .08); player.run = 4.4 * (1 + p.spdLv * .08); Snd.buy(); saveProf(); reopen(); };
+  const sd = el.querySelector('[data-spd]'); if (sd) sd.onclick = () => { const c = 200 * (p.spdLv + 1); if (p.money < c) return toast('錢不夠喔'); p.money -= c; p.spdLv++; player.speed = 4.4 * (1 + p.spdLv * .08); player.run = 6.2 * (1 + p.spdLv * .08); Snd.buy(); saveProf(); reopen(); };
   const close = () => { el.classList.remove('show'); G.paused = false; updateHUD(); };
   const nx = el.querySelector('[data-next]'); if (nx) nx.onclick = () => { close(); startLevel(G.prof.level); };
   const rt = el.querySelector('[data-retry]'); if (rt) rt.onclick = () => { close(); startLevel(G.level); };
@@ -797,7 +801,8 @@ function horrorEvents(dt, L, zone) {
   }
 }
 
-// ================= pause: continue / save / restart =================
+// ================= pause: continue / save / restart / help / back home =================
+const HELP = {"clean": ["🪳 清潔大作戰", "家裡冒出蟑螂、蚊子和老鼠，用掃把、水槍、殺蟲劑把牠們全部消滅。每關清完會進商店，用賺到的錢買武器和升級。關卡越後面數量越多，還會出現異常巨大的蟲、停電和大量湧出，最後要打倒蟑螂王。"], "ghost": ["👻 驅鬼大師", "家裡鬧鬼了！用艾草棒、聖水槍、符咒把鬼魂趕走。紅色箭頭會指出最近的鬼在哪（樓上／樓下）。越後面鬼越多、越兇，還有殭屍、巨大的鬼和突然衝到眼前的臉，最後對決鬼王。"], "destroy": ["🔨 拆家狂人", "用鐵鎚、武士刀、手榴彈、大砲把整個家拆掉，拆越多賺越多，可以按 B 開商店買更強的武器。全部拆光有全毀獎金，之後可以把房子復原再拆一次（只影響遊戲，不會改到你的設計）。"], "adventure": ["🗝 探險模式", "走進地下室、下水道和神秘傳送門，打開寶箱拿武器與道具，打倒怪物賺錢。後室越深層怪物越多、越大，還有「嚇人」怪會在你靠近時衝到眼前。倒下時錢和武器都會保留。"], "hide": ["👤 捉迷藏", "白色小人躲在家裡各處，身體會變成旁邊牆壁或家具的保護色。看仔細，用 🔫 射中就算找到（+6 秒），打空會扣 3 秒。📡 提示（H 鍵）每關 3 次，最近的小人會從那個方向傳來笑聲。第 3 關起你沒在看的小人會偷偷換位置。"]};
 export function openPause() {
   if (!G.active || $('#shop').classList.contains('show') || $('#dialog').classList.contains('show')) return;
   G.paused = true; holding = false; beam.visible = false;
@@ -806,6 +811,8 @@ export function openPause() {
   showDialog('⏸ 暫停 · ' + name, info + '<br><small>進度會自動存檔，也可以手動存檔。</small>', [
     ['▶ 繼續', () => { G.paused = false; }],
     ['💾 存檔', () => { saveProf(); toast('💾 已存檔'); G.paused = false; }],
+    ['📖 遊戲說明', () => { const h = HELP[G.kind]; showDialog('📖 ' + h[0], h[1] + `<br><br><small>🎮 電腦：WASD 移動、滑鼠看、左鍵攻擊、Shift 跑、空白鍵跳、E 開門/互動、Q 換武器、H 補血／提示、G 回家、Alt 放開滑鼠、Esc 暫停<br>📱 手機：左半邊搖桿移動、右半邊滑動看、右下按鈕攻擊與互動</small>`, [['◀ 返回', () => { G.paused = false; openPause(); }]]); }],
+    ['🚪 回到家門口', () => { G.paused = false; on.home && on.home(); }],
     ['🔁 重新開始', () => showDialog('確定重新開始？', '這個遊戲的金錢、武器和關卡都會清空，從第 1 關開始。', [['🔁 確定重新開始', () => restartGame()], ['取消', () => { G.paused = false; }]])],
     ['🏠 回主選單', () => on.escape && on.escape('menu')]]);
 }
@@ -1031,7 +1038,7 @@ function updateAdventure(dt) {
   const z = zoneOf(floorOf(player.pos.y));
   if (z?.kind === 'backroom') { const k = (S.data.zones || []).filter(q => q.kind === 'backroom').indexOf(z); horrorEvents(dt, 3 + k * 2, z); }
   const b = G.buffs; for (const k in b) if (b[k] > 0) { b[k] -= dt; if (b[k] <= 0) toast({ speed: '加速結束', power: '攻擊力恢復', shield: '護盾消失' }[k], 1200); }
-  const k = (1 + G.prof.spdLv * .08) * (b.speed > 0 ? 1.6 : 1); player.speed = 2.4 * k; player.run = 4.4 * k;
+  const k = (1 + G.prof.spdLv * .08) * (b.speed > 0 ? 1.6 : 1); player.speed = 4.4 * k; player.run = 6.2 * k;
   for (const c of chests) {
     const lid = c.mesh.userData.lid;
     if (c.open) { c.t += dt; lid.rotation.x = -Math.min(1.9, c.t * 4); if (c.re > 0 && c.t > c.re) { c.open = false; c.t = 0; } }

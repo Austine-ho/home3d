@@ -94,6 +94,7 @@ body.touch .phelp{display:none}
 #ptools{max-height:calc(100vh - 80px - var(--sat));overflow-y:auto}
 .alist{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto}.aitem{text-align:left;font-size:12px;padding:5px 8px;background:#2a2340}
 #ptools button span{font-size:20px} #ptools button.on{background:var(--acc)}
+#ptools.two{display:grid;grid-template-columns:repeat(2,64px);align-content:start}
 #ptools button.adm{border:1px solid #9a6cff} #ptools button.adm.on{background:#7a4cff}
 #pfloors button.zone{background:#2a3324} #pfloors button.adm{background:#3a2a5a;border:1px solid #9a6cff} #pfloors button.on{background:var(--acc)}
 #padm{display:none;background:#7a4cff;color:#fff;border-radius:10px;padding:3px 8px;font-size:12px;white-space:nowrap;margin-right:4px} #plan.admin #padm{display:inline-block}
@@ -111,6 +112,7 @@ body.touch .phelp{display:none}
   #panel{left:8px;right:8px;width:auto;top:auto;height:46%;bottom:calc(8px + var(--sab))}
   #ptools{left:0;right:0;top:auto;bottom:calc(0px + var(--sab));flex-direction:row;overflow-x:auto;padding:6px;background:rgba(20,24,30,.95)}
   #ptools button{flex:none;width:58px}
+  #ptools.two{display:grid;grid-template-columns:none;grid-auto-flow:column;grid-template-rows:repeat(2,auto);grid-auto-columns:58px;overflow-x:auto}
   #pprops{left:6px;right:6px;width:auto;top:auto;bottom:calc(76px + var(--sab));max-height:46%}
   #phint{bottom:calc(84px + var(--sab));font-size:11px}
 }
@@ -142,7 +144,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 #banner b{display:block;font-size:40px;text-shadow:0 3px 12px #000;white-space:nowrap} #banner span{font-size:17px;text-shadow:0 2px 6px #000}
 .ftext{position:fixed;transform:translate(-50%,-50%);color:#ffd24a;font-weight:700;font-size:18px;text-shadow:0 2px 4px #000;pointer-events:none;z-index:21;animation:fup .9s forwards}
 @keyframes fup{to{transform:translate(-50%,-160%);opacity:0}}
-#shop,#dialog{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:35;padding:16px}
+#shop,#dialog{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:45;padding:16px}
 #shop.show,#dialog.show{display:flex}
 #shop .card,#dialog .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;width:min(560px,100%);max-height:90vh;overflow:auto}
 #shop h2,#dialog h2{margin:0 0 6px} .money{color:#ffd24a;font-weight:700;margin-bottom:10px}

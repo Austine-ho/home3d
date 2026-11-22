@@ -2,9 +2,9 @@
 import { THREE, S, camera, renderer, isTouch, $, clamp, toast } from './core.js';
 import { hits, groundAt, pushOut } from './house.js';
 
-export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 2.4, run: 4.4, eye: 1.58, bob: 0 };
+export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 4.4, run: 6.2, eye: 1.58, bob: 0 };
 export const input = { keys: {}, jx: 0, jy: 0, look: true, attack: false };
-export const on = { heal: null, interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
+export const on = { home: null, heal: null, interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
 export const fx = { shake: 0, kick: 0 };
 
 const cvs = renderer.domElement;
@@ -15,8 +15,9 @@ export function requestLock() {
   try { const p = cvs.requestPointerLock(); if (p && p.catch) p.catch(() => { }); } catch (e) { }
 }
 export function releaseLock() { wantLock = false; if (locked()) document.exitPointerLock(); }
+let lockTip = false;
 document.addEventListener('pointerlockchange', () => {
-  if (locked()) wasLocked = true;
+  if (locked()) { wasLocked = true; if (!lockTip) { lockTip = true; toast('🖱 按 Alt（Mac 是 Option）放開滑鼠去點按鈕', 3500); } }
   else if (wasLocked && wantLock) { wantLock = false; on.escape && on.escape(); }
   if (!locked()) wasLocked = false;
 });
@@ -26,6 +27,10 @@ addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
   input.keys[e.code] = true;
   if (e.code === 'Tab') e.preventDefault();
+  // Alt (Option on Mac): let go of the mouse so the on-screen buttons can be clicked; click the scene to look around again
+  if ((e.code === 'AltLeft' || e.code === 'AltRight') && !e.repeat && (S.mode === 'visit' || S.mode === 'game')) {
+    e.preventDefault(); if (locked()) { releaseLock(); toast('🖱 滑鼠已放開，可以點按鈕；點一下畫面回到視角', 2200); } else requestLock();
+  }
   on.key && on.key(e);
 });
 addEventListener('keyup', e => { input.keys[e.code] = false; });
@@ -44,7 +49,7 @@ addEventListener('mouseup', e => { drag = null; if (e.button === 0 && input.atta
 document.addEventListener('mousemove', e => {
   if (!input.look) return;
   if (locked()) look(e.movementX * 2.2, e.movementY * 2.2);
-  else if (drag) { look((e.clientX - drag.x) * 4, (e.clientY - drag.y) * 4); drag = { x: e.clientX, y: e.clientY }; }
+  else if (drag) { look((e.clientX - drag.x) * 5, (e.clientY - drag.y) * 5); drag = { x: e.clientX, y: e.clientY }; }
 });
 const SENS = 0.00125; // +25% (was 0.001)
 export function look(dx, dy) { player.yaw -= dx * SENS; player.pitch = clamp(player.pitch - dy * SENS, -1.45, 1.45); }
@@ -65,7 +70,7 @@ cvs.addEventListener('touchmove', e => {
       let dx = t.clientX - jt.x, dy = t.clientY - jt.y; const l = Math.hypot(dx, dy), mx = 50;
       if (l > mx) { dx *= mx / l; dy *= mx / l; }
       input.jx = dx / mx; input.jy = -dy / mx; knob.style.transform = `translate(${dx}px,${dy}px)`;
-    } else if (lt && t.identifier === lt.id) { look((t.clientX - lt.x) * 5, (t.clientY - lt.y) * 5); lt.x = t.clientX; lt.y = t.clientY; }
+    } else if (lt && t.identifier === lt.id) { { const mx = t.clientX - lt.x, my = t.clientY - lt.y, acc = 1 + Math.min(1.2, Math.hypot(mx, my) / 25); look(mx * 8.5 * acc, my * 8.5 * acc); } lt.x = t.clientX; lt.y = t.clientY; }
   }
 }, { passive: true });
 function endTouch(e) {
