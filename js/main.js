@@ -58,6 +58,7 @@ on.key = e => {
   if (e.code === 'Escape' && (S.mode === 'visit' || S.mode === 'game') && !locked()) setMode('menu');
   if (e.code === 'Tab') { if (S.mode === 'visit') setMode('edit'); else if (S.mode === 'edit') setMode('visit'); }
   if (e.code === 'KeyL' && S.mode === 'visit') setNight(!S.night);
+  if (e.code === 'KeyG' && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit')) goHome();
   if (e.code === 'KeyE' && (S.mode === 'visit' || S.mode === 'game')) interact();
   if (e.code === 'KeyQ' && S.mode === 'game') on.switchW && on.switchW();
   if (e.code === 'KeyH' && S.mode === 'game') usePotion();
@@ -72,11 +73,37 @@ function aim() {
   ray.setFromCamera(center, camera); ray.far = 2.6;
   const objs = [...H.doors.filter(d => !d.dead).flatMap(d => d.kind === 'hinge' ? [d.leaf] : [d.p1, d.p2]), ...H.lamps.map(l => l.mesh)];
   const hit = ray.intersectObjects(objs, true)[0]; ray.far = Infinity;
-  if (!hit) return null; const u = hit.object.userData; return u.door ? { door: u.door } : u.lamp ? { lamp: u.lamp } : null;
+  if (!hit) return null; const u = hit.object.userData; return u.door ? { door: u.door, dist: hit.distance } : u.lamp ? { lamp: u.lamp } : null;
 }
-function interact() { if (S.mode === 'game' && advInteract()) return; const pt = nearPortal(player.pos); if (pt && !autoPortal(pt.p)) return usePortal(pt.p); const a = aim(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
+// closest closed-or-open door roughly in front of the player (fallback when the aim ray slips through a gap)
+function doorAhead(maxD = 1.6) {
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw); let best = null, bd = maxD;
+  for (const d of H.doors) {
+    if (d.dead || Math.abs(d.fi === undefined ? 0 : (floorY(d.fi) - player.pos.y)) > 1.2) continue;
+    let cx, cz;
+    if (d.kind === 'hinge') { cx = d.pivot.position.x + Math.cos(d.base) * d.w / 2; cz = d.pivot.position.z - Math.sin(d.base) * d.w / 2; }
+    else { const p = d.fr.position; cx = p.x; cz = p.z; }
+    const dx = cx - player.pos.x, dz = cz - player.pos.z, dist = Math.hypot(dx, dz);
+    if (dist < bd && (dx * fx + dz * fz) / (dist || 1) > .35) { bd = dist; best = d; }
+  }
+  return best ? { door: best, dist: bd } : null;
+}
+function interact() { if (S.mode === 'game' && advInteract()) return; const pt = nearPortal(player.pos); if (pt && !autoPortal(pt.p)) return usePortal(pt.p); const a = aim() || doorAhead(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
 on.interact = interact; on.heal = usePotion; $('#potions').onclick = () => usePotion();
 $('#btnNight').onclick = () => setNight(!S.night);
+// 🏠 back home: just inside the front door on 1F (also the fix for being locked out)
+function goHome() {
+  let x = 2.9, d = 1.2;
+  const f0 = S.data.floors[0];
+  for (const w of f0.walls) for (const o of w.ops || []) if (o.type === 'door2') {
+    const L = Math.hypot(w.x2 - w.x1, w.d2 - w.d1), ux = (w.x2 - w.x1) / L, ud = (w.d2 - w.d1) / L, cx = w.x1 + ux * o.at, cd = w.d1 + ud * o.at;
+    let nx = ud, nd = -ux; if (nd < 0) { nx = -nx; nd = -nd; } x = cx + nx * 1.3; d = cd + nd * 1.3;
+  }
+  player.pos.set(x, .05, -d); player.vy = 0; player.yaw = 0; player.pitch = -.05; player.lastG = 0;
+  if (S.mode === 'edit') selectFurn(null);
+  toast('🏠 回到家了');
+}
+$('#btnHome').onclick = e => { e.stopPropagation(); goHome(); };
 // ---------- portals ----------
 const autoPortal = p => p.style === 'portal' || p.style === 'door';
 let portalCD = 0, portalArmed = true;
@@ -106,8 +133,8 @@ function teleport(fi) {
   const st = S.data.stairs.find(s => s.floor === fi - 1) || S.data.stairs.find(s => s.floor === fi);
   if (fi === 0) { player.pos.set(2.9, 0, 2.4); player.yaw = 0; }
   else if (st) { const g = stairGeom(st), [ax, ad] = st.floor === fi - 1 ? g.arrive : g.start; player.pos.set(ax, floorY(fi) + .05, -ad); }
-  else { const r = S.data.floors[fi].rooms[0]; player.pos.set((r.x0 + r.x1) / 2, floorY(fi), -(r.d0 + r.d1) / 2); }
-  player.vy = 0; toast('📍 ' + S.data.floors[fi].name);
+  else { const r = allFl()[fi].rooms[0]; player.pos.set((r.x0 + r.x1) / 2, floorY(fi), -(r.d0 + r.d1) / 2); }
+  player.vy = 0; toast('📍 ' + allFl()[fi].name);
 }
 
 // ---------- 3D edit (furniture & paint) ----------
@@ -130,8 +157,8 @@ function editAction(a) {
   if (a === 'rl' || a === 'rr') { f.rot = ((f.rot || 0) + (a === 'rl' ? 15 : -15)) % 360; e.obj.rotation.y = f.rot * DEG; }
   if (a === 'r90') { f.rot = ((f.rot || 0) + 90) % 360; e.obj.rotation.y = f.rot * DEG; }
   if (a === 'up' || a === 'dn') { f.y = clamp((f.y || 0) + (a === 'up' ? .05 : -.05), 0, 2.8); e.obj.position.y = floorY(e.fi) + f.y; }
-  if (a === 'del') { const fl = S.data.floors[e.fi]; fl.furniture = fl.furniture.filter(x => x !== f); removeFurnitureEntry(e); selectFurn(null); S.save(); toast('已刪除'); return; }
-  if (a === 'dup') { const c = { ...f, x: f.x + .4, d: f.d + .4 }; S.data.floors[e.fi].furniture.push(c); const n = spawnFurniture(c, e.fi); refreshSolids(); selectFurn(n); S.save(); return; }
+  if (a === 'del') { const fl = allFl()[e.fi]; fl.furniture = fl.furniture.filter(x => x !== f); removeFurnitureEntry(e); selectFurn(null); S.save(); toast('已刪除'); return; }
+  if (a === 'dup') { const c = { ...f, x: f.x + .4, d: f.d + .4 }; allFl()[e.fi].furniture.push(c); const n = spawnFurniture(c, e.fi); refreshSolids(); selectFurn(n); S.save(); return; }
   refreshFurnBox(e); refreshSolids(); selectFurn(e); S.save();
 }
 function editKey(e) {
@@ -179,7 +206,7 @@ cvs.addEventListener('contextmenu', e => e.preventDefault());
   $('#catalog').querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
     const type = b.dataset.add, fi = floorOf(player.pos.y);
     const f = { type, x: Math.round((player.pos.x - Math.sin(player.yaw) * 1.5) * 20) / 20, d: -Math.round((player.pos.z - Math.cos(player.yaw) * 1.5) * 20) / 20, rot: Math.round(player.yaw / DEG / 90) * 90, y: CAT[type].y || 0 };
-    S.data.floors[fi].furniture.push(f); const e = spawnFurniture(f, fi); refreshSolids(); selectFurn(e); S.save(); toast(`新增：${CAT[type].n}（拖曳移動）`, 1200);
+    allFl()[fi].furniture.push(f); const e = spawnFurniture(f, fi); refreshSolids(); selectFurn(e); S.save(); toast(`新增：${CAT[type].n}（拖曳移動）`, 1200);
   });
   const mk = (id, p) => `<button data-p="${id}" style="${p.tex ? `background-image:url(${tex(p.tex).userData.css});background-size:60px` : `background:${p.c}`}"><span>${p.n}</span></button>`;
   $('#swPaint').innerHTML = Object.entries(PRESETS).filter(([, p]) => !p.tex).map(([id, p]) => mk(id, p)).join('');
@@ -216,7 +243,10 @@ function loop() {
   if (selBox.visible && sel) selBox.box.copy(sel.box);
   hintT -= dt;
   if (hintT <= 0 && (S.mode === 'visit' || S.mode === 'game')) {
-    hintT = .15; const a = aim(), h = $('#hint');
+    hintT = .15; const a = aim() || doorAhead(), h = $('#hint');
+    // doors open by themselves when you walk into them
+    const k = input.keys, moving = k.KeyW || k.ArrowUp || Math.abs(input.jy) > .3;
+    if (moving && a?.door && !a.door.open && a.dist < 1.3) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .06); }
     const pt = nearPortal(player.pos), ah = S.mode === 'game' && advHint();
     if (ah) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${ah}`; h.style.display = 'block'; }
     else if (pt && !autoPortal(pt.p)) { h.textContent = `${isTouch ? '按 ✋' : 'E'} ${pt.p.name || '進入'}`; h.style.display = 'block'; }

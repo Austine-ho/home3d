@@ -292,10 +292,28 @@ cvs.addEventListener('pointerdown', e => {
     P.sel = { k: hit.k, o: hit.o, w: hit.w }; renderProps();
     const start = { x, d, snap: JSON.parse(JSON.stringify(hit.o)) };
     if (hit.k === 'wall') { const w = hit.o; start.joined = joinedEnds(w); }
+    if (hit.k === 'room') start.walls = wallSnap();
     P.drag = { mode: 'move', hit, start, moved: false };
   } else { P.sel = null; renderProps(); P.drag = { mode: 'pan', sx, sy, ox: P.ox, oy: P.oy }; }
   draw();
 });
+// walls follow the room: every wall end lying on an edge of the room moves with that edge
+// (walls along the edge slide, walls meeting the edge stretch). Works from a snapshot so dragging never drifts.
+P.linkWalls = true;
+function wallSnap() { return fl().walls.map(w => [w, w.x1, w.d1, w.x2, w.d2]); }
+function syncWalls(o, n, snap) {
+  const e = .15, inX = v => v > o.x0 - e && v < o.x1 + e, inD = v => v > o.d0 - e && v < o.d1 + e;
+  for (const [w, x1, d1, x2, d2] of snap) {
+    const pts = [[x1, d1], [x2, d2]], horiz = Math.abs(x2 - x1) >= Math.abs(d2 - d1), out = pts.map(p => [...p]);
+    for (const [k, nk, isX] of [['x0', 'x0', 1], ['x1', 'x1', 1], ['d0', 'd0', 0], ['d1', 'd1', 0]]) {
+      const ed = o[k], on = pts.map(([x, d]) => isX ? Math.abs(x - ed) < e && inD(d) : Math.abs(d - ed) < e && inX(x));
+      const along = on[0] && on[1] && (isX ? !horiz : horiz);           // wall lies on this edge: slide it
+      const meets = (isX ? horiz : !horiz);                              // wall runs into this edge: stretch that end
+      on.forEach((hit, i) => { if (hit && (along || meets)) out[i][isX ? 0 : 1] = n[nk]; });
+    }
+    [[w.x1, w.d1], [w.x2, w.d2]] = out;
+  }
+}
 function joinedEnds(w) {
   const out = []; for (const o of fl().walls) { if (o === w) continue; for (const e of [1, 2]) { const ox = o['x' + e], od = o['d' + e]; if (Math.hypot(ox - w.x1, od - w.d1) < .03) out.push([o, e, 1]); else if (Math.hypot(ox - w.x2, od - w.d2) < .03) out.push([o, e, 2]); } } return out;
 }
@@ -317,6 +335,7 @@ cvs.addEventListener('pointermove', e => {
     if (h.k === 'room') {
       if (!h.h) { o.x0 = snapV(s.x0 + dx); o.x1 = o.x0 + (s.x1 - s.x0); o.d0 = snapV(s.d0 + dd); o.d1 = o.d0 + (s.d1 - s.d0); }
       else { if (h.h.includes('x0')) o.x0 = Math.min(snapV(x), o.x1 - .3); if (h.h.includes('x1')) o.x1 = Math.max(snapV(x), o.x0 + .3); if (h.h.includes('d0')) o.d0 = Math.min(snapV(d), o.d1 - .3); if (h.h.includes('d1')) o.d1 = Math.max(snapV(d), o.d0 + .3); }
+      if (P.linkWalls) syncWalls(s, o, dg.start.walls);
     } else if (h.k === 'wall') {
       if (h.h) { const [px, pd] = snapPoint(x, d, w => w === o); o['x' + h.h] = px; o['d' + h.h] = pd; for (const [w2, e2, mine] of dg.start.joined) if (mine === h.h) { w2['x' + e2] = px; w2['d' + e2] = pd; } }
       else { const mx = snapV(dx), md = snapV(dd); o.x1 = s.x1 + mx; o.d1 = s.d1 + md; o.x2 = s.x2 + mx; o.d2 = s.d2 + md; for (const [w2, e2, mine] of dg.start.joined) { w2['x' + e2] = o['x' + mine]; w2['d' + e2] = o['d' + mine]; } }
@@ -412,6 +431,7 @@ export function renderProps() {
     h = `<div class="ph">空間</div><label class="pf"><span>名稱</span><input type="text" data-k="name" value="${r.name}"></label>
       ${num('左邊 X', 'x0', r.x0)}${num('前緣 深度', 'd0', r.d0)}${num('寬 (m)', 'w', r.x1 - r.x0, .05, .3)}${num('深 (m)', 'dd', r.d1 - r.d0, .05, .3)}
       <div class="grp">地板材質</div>${swatchSelect(r.floor, 'floor')}
+      <label class="pf"><span>牆跟著動</span><input type="checkbox" id="pLink" ${P.linkWalls ? 'checked' : ''}> <small style="color:var(--mut)">改尺寸時牆一起移動</small></label>
       <div class="rowb"><button id="pWalls">🧱 加四面牆</button><button id="pDel" class="danger">🗑 刪除空間</button></div>`;
   } else if (s.k === 'wall') {
     const w = s.o, L = Math.hypot(w.x2 - w.x1, w.d2 - w.d1);
@@ -466,7 +486,8 @@ export function renderProps() {
   el.innerHTML = h + `<div class="rowb"><button id="pDone">完成</button></div>`;
   el.querySelectorAll('input[data-k],select[data-k]').forEach(inp => inp.onchange = () => {
     const k = inp.dataset.k, v = inp.type === 'number' ? +inp.value : inp.value, o = s.o;
-    if (s.k === 'room') { if (k === 'w') o.x1 = o.x0 + Math.max(.3, v); else if (k === 'dd') o.d1 = o.d0 + Math.max(.3, v); else if (k === 'x0') { const w = o.x1 - o.x0; o.x0 = v; o.x1 = v + w; } else if (k === 'd0') { const d = o.d1 - o.d0; o.d0 = v; o.d1 = v + d; } else o[k] = v; }
+    if (s.k === 'room' && ['w', 'dd', 'x0', 'd0'].includes(k)) { const old = { ...o }, snap = wallSnap(); if (k === 'w') o.x1 = o.x0 + Math.max(.3, v); else if (k === 'dd') o.d1 = o.d0 + Math.max(.3, v); else if (k === 'x0') { const w = o.x1 - o.x0; o.x0 = v; o.x1 = v + w; } else { const d = o.d1 - o.d0; o.d0 = v; o.d1 = v + d; } if (P.linkWalls) syncWalls(old, o, snap); }
+    else if (s.k === 'room') { if (k === 'w') o.x1 = o.x0 + Math.max(.3, v); else if (k === 'dd') o.d1 = o.d0 + Math.max(.3, v); else if (k === 'x0') { const w = o.x1 - o.x0; o.x0 = v; o.x1 = v + w; } else if (k === 'd0') { const d = o.d1 - o.d0; o.d0 = v; o.d1 = v + d; } else o[k] = v; }
     else if (s.k === 'wall' && k === 'len') { const L = Math.hypot(o.x2 - o.x1, o.d2 - o.d1); const j = joinedEnds(o).filter(x => x[2] === 2); o.x2 = o.x1 + (o.x2 - o.x1) / L * v; o.d2 = o.d1 + (o.d2 - o.d1) / L * v; for (const [w2, e2] of j) { w2['x' + e2] = o.x2; w2['d' + e2] = o.d2; } }
     else if (s.k === 'stair' && k === 'floor') { o.floor = +v; }
     else if (s.k === 'portal' && k === 'tofl') { if (v === '') o.to = null; else { const i = +v, z = i >= nF() ? allFl()[i] : null, r0 = allFl()[i].rooms[0]; o.to = { ...(z ? { zid: z.id } : { fi: i }), x: o.to?.x ?? (r0 ? (r0.x0 + r0.x1) / 2 : 1), d: o.to?.d ?? (r0 ? (r0.d0 + r0.d1) / 2 : 1) }; } }
@@ -479,7 +500,7 @@ export function renderProps() {
   el.querySelectorAll('.sws').forEach(sw => sw.querySelectorAll('button').forEach(b => b.onclick = () => { s.o[sw.dataset.name] = b.dataset.v; commit(); }));
   const on = (id, f) => { const b = el.querySelector('#' + id); if (b) b.onclick = f; };
   on('pDel', delSel); on('pDone', () => { P.sel = null; renderProps(); draw(); });
-  on('pWalls', () => wallsAround(s.o)); on('pSplit', () => splitWall(s.o));
+  on('pWalls', () => wallsAround(s.o)); const lk = el.querySelector('#pLink'); if (lk) lk.onchange = () => { P.linkWalls = lk.checked; }; on('pSplit', () => splitWall(s.o));
   on('pAddDoor', () => { P.tool = 'door'; buildToolbar(); hintTool(); toast('點牆上要開門的位置'); });
   on('pAddWin', () => { P.tool = 'window'; buildToolbar(); hintTool(); toast('點牆上要開窗的位置'); });
   on('pSwing', () => { s.o.swing = s.o.swing === 'a' ? 'b' : 'a'; commit(); });

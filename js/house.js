@@ -132,8 +132,12 @@ export function build(data, opts = {}) {
   all.forEach((fl, fi) => {
     const g = new THREE.Group(); g.userData.fi = fi; H.root.add(g); H.floors.push(g);
     const Y = floorY(fi), zone = fi >= nF;
-    for (const r of fl.rooms) buildSlab(g, fi, r, holes[fi], Y);
-    if (fi === nF - 1 || zone) for (const r of fl.rooms) buildRoof(g, r, Y + CH);
+    // overlapping rooms would draw two floors in the same plane (flicker): the smaller room wins the overlap
+    const area = r => (r.x1 - r.x0) * (r.d1 - r.d0);
+    const over = (r, i) => fl.rooms.filter((o, j) => o !== r && (area(o) < area(r) || (area(o) === area(r) && j > i)) && o.x0 < r.x1 && o.x1 > r.x0 && o.d0 < r.d1 && o.d1 > r.d0);
+    fl.rooms.forEach((r, i) => buildSlab(g, fi, r, [...holes[fi], ...over(r, i)], Y));
+    if (zone) fl.rooms.forEach((r, i) => buildCeiling(g, r, over(r, i), Y + CH));
+    else if (fi === nF - 1) fl.rooms.forEach((r, i) => buildRoof(g, r, over(r, i), Y + CH));
     for (const w of fl.walls) buildWall(g, fi, w, Y);
     for (const f of fl.furniture) spawnFurniture(f, fi);
     for (const r of fl.rooms) {
@@ -163,10 +167,19 @@ function buildSlab(g, fi, r, holes, Y) {
     H.slabMeshes.push(m); H.cells.push({ x0: c.x0, x1: c.x1, z0: -c.d1, z1: -c.d0, y: Y, fi });
   }
 }
-function buildRoof(g, r, y) {
-  const w = r.x1 - r.x0, dd = r.d1 - r.d0;
-  const m = new THREE.Mesh(BG(w + .02, .2, dd + .02), [ceilMat, ceilMat, P('concrete'), ceilMat, ceilMat, ceilMat]);
-  m.position.set((r.x0 + r.x1) / 2, y + .1, -(r.d0 + r.d1) / 2); g.add(m); m.userData.roof = 1;
+function buildRoof(g, r, holes, y) {
+  for (const c of rectCells(r, holes)) {
+    const w = c.x1 - c.x0, dd = c.d1 - c.d0;
+    const m = new THREE.Mesh(BG(w, .2, dd), [ceilMat, ceilMat, P('concrete'), ceilMat, ceilMat, ceilMat]);
+    m.position.set((c.x0 + c.x1) / 2, y + .1, -(c.d0 + c.d1) / 2); g.add(m); m.userData.roof = 1;
+  }
+}
+// underground zones: only a downward-facing ceiling, so nothing pokes up through the ground or the 1F floor
+function buildCeiling(g, r, holes, y) {
+  for (const c of rectCells(r, holes)) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(c.x1 - c.x0, c.d1 - c.d0), ceilMat); m.userData.own = 1;
+    m.rotation.x = Math.PI / 2; m.position.set((c.x0 + c.x1) / 2, y, -(c.d0 + c.d1) / 2); g.add(m);
+  }
 }
 
 function wallPieces(L, ops, hgt) {
@@ -287,7 +300,7 @@ function buildOpening(g, fi, w, o, Y, at, ux, ud, th) {
     const pivot = new THREE.Group(); pivot.position.set(hx, Y + o.sill, -hd); g.add(pivot);
     const base = th + (lf.end ? Math.PI : 0);
     const sgn = (o.swing === 'a' ? -1 : 1) * (lf.end ? -1 : 1);
-    const leaf = leafMesh(o.style, lf.w - .02, o.h - .02); leaf.position.x = .01; pivot.add(leaf);
+    const leaf = leafMesh(o.style, lf.w - (leaves.length > 1 ? .004 : .02), o.h - .02); leaf.position.x = leaves.length > 1 ? .002 : .01; pivot.add(leaf);
     const d = { kind: 'hinge', fi, pivot, leaf, base, delta: 88 * DEG * sgn, t: 0, open: false, w: lf.w, y0: Y + o.sill, h: o.h, name: o.type === 'door2' ? '大門' : '門', hp: 40, max: 40 };
     pivot.rotation.y = base;
     leaf.traverse(m => m.userData.door = d);
@@ -358,7 +371,9 @@ export function removeFurnitureEntry(e) {
   H.furn = H.furn.filter(x => x !== e); H.breakables = H.breakables.filter(x => x !== e); refreshSolids();
 }
 export function refreshSolids() {
-  H.solids = [...H.steps, ...H.furn.filter(e => !e.nc && !e.dead).map(e => e.box)];
+  // small items (plants, stools, cones…) never block the way: you just brush past them
+  const small = b => (b.max.x - b.min.x) * (b.max.z - b.min.z) < .3;
+  H.solids = [...H.steps, ...H.furn.filter(e => !e.nc && !e.dead && !small(e.box)).map(e => e.box)];
 }
 
 // ---------- collision ----------
