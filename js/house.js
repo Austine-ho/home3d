@@ -5,11 +5,11 @@ import { CAT, buildFurniture } from './catalog.js';
 export const FH = 3.2, CH = 3.0, T = 0.12;
 let dataRef = null;
 // unified floor list: normal floors first, then zones (basement, sewer, backrooms) which sit at their own height
-export const allFl = (d = dataRef || S.data) => d ? [...d.floors, ...(d.zones || [])] : [];
+export const allFl = (d = S.data || dataRef) => d ? [...d.floors, ...(d.zones || [])] : [];
 export const zoneIdx = (d, zid) => { const k = (d.zones || []).findIndex(z => z.id === zid); return k < 0 ? -1 : d.floors.length + k; };
-export const entFi = (e, d = dataRef || S.data) => e.zid ? zoneIdx(d, e.zid) : (e.fi || 0);
-export const zoneOf = (fi, d = dataRef || S.data) => d && fi >= d.floors.length ? d.zones[fi - d.floors.length] : null;
-export const floorY = i => { const d = dataRef || S.data, n = d ? d.floors.length : 99; return i < n ? i * FH : (d.zones?.[i - n]?.y ?? 0); };
+export const entFi = (e, d = S.data || dataRef) => e.zid ? zoneIdx(d, e.zid) : (e.fi || 0);
+export const zoneOf = (fi, d = S.data || dataRef) => d && fi >= d.floors.length ? d.zones[fi - d.floors.length] : null;
+export const floorY = i => { const d = S.data || dataRef, n = d ? d.floors.length : 99; return i < n ? i * FH : (d.zones?.[i - n]?.y ?? 0); };
 export const H = {
   root: new THREE.Group(), floors: [], segs: [], steps: [], solids: [], cells: [], doors: [], lamps: [], surf: {},
   furn: [], breakables: [], wallMeshes: [], blockMeshes: [], slabMeshes: [], destruct: false, totalBlocks: 0, brokenBlocks: 0,
@@ -37,7 +37,7 @@ const SEASON = {
 };
 let envKey = '', curSeason = SEASON.none, underground = false;
 const extMat = { ground: new THREE.MeshStandardMaterial({ color: '#6f7a62', roughness: 1 }) };
-export function envFor(fi) { const d = dataRef || S.data, z = zoneOf(fi, d); return { ...DEF_ENV, ...(d?.env || {}), ...(z?.env || {}), zone: z }; }
+export function envFor(fi) { const d = S.data || dataRef, z = zoneOf(fi, d); return { ...DEF_ENV, ...(d?.env || {}), ...(z?.env || {}), zone: z }; }
 export function applyEnv(force) {
   const d = dataRef; if (!d) return;
   const fi = floorOf(camera.position.y - 1.5), e = envFor(fi), z = e.zone;
@@ -133,12 +133,12 @@ export function build(data, opts = {}) {
     const g = new THREE.Group(); g.userData.fi = fi; H.root.add(g); H.floors.push(g);
     const Y = floorY(fi), zone = fi >= nF;
     // overlapping rooms would draw two floors in the same plane (flicker): the smaller room wins the overlap
-    const area = r => (r.x1 - r.x0) * (r.d1 - r.d0);
-    const over = (r, i) => fl.rooms.filter((o, j) => o !== r && (area(o) < area(r) || (area(o) === area(r) && j > i)) && o.x0 < r.x1 && o.x1 > r.x0 && o.d0 < r.d1 && o.d1 > r.d0);
-    fl.rooms.forEach((r, i) => buildSlab(g, fi, r, [...holes[fi], ...over(r, i)], Y));
-    if (zone) fl.rooms.forEach((r, i) => buildCeiling(g, r, over(r, i), Y + CH));
-    else if (fi === nF - 1) fl.rooms.forEach((r, i) => buildRoof(g, r, over(r, i), Y + CH));
-    for (const w of fl.walls) buildWall(g, fi, w, Y);
+    const area = r => (r.x1 - r.x0) * (r.d1 - r.d0), rooms = healRooms(fl.rooms);
+    const over = (r, i) => rooms.filter((o, j) => o !== r && (area(o) < area(r) || (area(o) === area(r) && j > i)) && o.x0 < r.x1 && o.x1 > r.x0 && o.d0 < r.d1 && o.d1 > r.d0);
+    rooms.forEach((r, i) => buildSlab(g, fi, r, [...holes[fi], ...over(r, i)], Y));
+    if (zone) rooms.forEach((r, i) => buildCeiling(g, r, over(r, i), Y + CH));
+    else if (fi === nF - 1) rooms.forEach((r, i) => buildRoof(g, r, over(r, i), Y + CH));
+    for (const w of fl.walls) buildWall(g, fi, w, Y, w.kind === 'rail' ? [0, 0] : wallExt(fl.walls, w));
     for (const f of fl.furniture) spawnFurniture(f, fi);
     for (const r of fl.rooms) {
       const area = (r.x1 - r.x0) * (r.d1 - r.d0);
@@ -156,6 +156,54 @@ export function build(data, opts = {}) {
   H._furnTotal = H.furn.length;
   refreshSolids();
   applyEnv(true);
+}
+// hand-edited plans leave walls a few cm short of each other and rooms not quite touching, which shows as thin
+// see-through lines. Heal them at build time only (the saved design is never changed).
+function healRooms(rooms) {
+  const G = .16;
+  return rooms.map(r => {
+    const h = { ...r };
+    for (const o of rooms) {
+      if (o === r) continue;
+      if (Math.min(r.d1, o.d1) - Math.max(r.d0, o.d0) > .05) { const g = o.x0 - r.x1; if (g > .001 && g < G) h.x1 = Math.max(h.x1, o.x0); }
+      if (Math.min(r.x1, o.x1) - Math.max(r.x0, o.x0) > .05) { const g = o.d0 - r.d1; if (g > .001 && g < G) h.d1 = Math.max(h.d1, o.d0); }
+    }
+    return h;
+  });
+}
+// how far each end of a wall must be stretched to reach just inside the wall it runs into (fills corner notches and short gaps)
+function wallExt(walls, w) {
+  const L = Math.hypot(w.x2 - w.x1, w.d2 - w.d1); if (L < .05) return [0, 0];
+  const ux = (w.x2 - w.x1) / L, ud = (w.d2 - w.d1) / L, out = [0, 0];
+  [[w.x1, w.d1, -1], [w.x2, w.d2, 1]].forEach(([px, pd, sg], k) => {
+    let best = null;
+    for (const o of walls) {
+      if (o === w || o.kind === 'rail') continue;
+      const oL = Math.hypot(o.x2 - o.x1, o.d2 - o.d1); if (oL < .05) continue;
+      const vx = (o.x2 - o.x1) / oL, vd = (o.d2 - o.d1) / oL, cr = ux * vd - ud * vx;
+      if (Math.abs(cr) < .34) continue;                                   // (nearly) parallel: never overlap those
+      const t = ((o.x1 - px) * vd - (o.d1 - pd) * vx) / cr, sAt = ((o.x1 - px) * ud - (o.d1 - pd) * ux) / cr;
+      if (sAt < -.15 || sAt > oL + .15) continue;
+      const e = t * sg; if (e < -.2 || e > .2) continue;                  // distance from this end to o's centre line
+      if ((o.ops || []).some(op => op.sill < .05 && Math.abs(sAt - op.at) < op.w / 2 + .02)) continue; // don't poke into a doorway
+      const need = e + T / 2 / Math.abs(cr) - .003;
+      if (need > 0 && (!best || Math.abs(e) < Math.abs(best.e))) best = { e, need };
+    }
+    if (best) out[k] = Math.min(best.need, .3);
+  });
+  // two walls drawn on top of each other (same line, overlapping) flicker: the later one gives up the shared part
+  const me = walls.indexOf(w);
+  for (const o of walls.slice(0, me)) {
+    if (o.kind === 'rail') continue;
+    const oL = Math.hypot(o.x2 - o.x1, o.d2 - o.d1); if (oL < .05) continue;
+    if (Math.abs(ux * (o.d2 - o.d1) / oL - ud * (o.x2 - o.x1) / oL) > .05) continue;
+    const off = (x, d) => Math.abs((x - w.x1) * ud - (d - w.d1) * ux); if (Math.min(off(o.x1, o.d1), off(o.x2, o.d2)) > .03) continue;
+    const pr = (x, d) => (x - w.x1) * ux + (d - w.d1) * ud, a = Math.min(pr(o.x1, o.d1), pr(o.x2, o.d2)), b = Math.max(pr(o.x1, o.d1), pr(o.x2, o.d2));
+    if (b - a < .05 || b <= .01 || a >= L - .01) continue;
+    if (a <= .01 && b >= L - .01) return [-L, 0];                       // completely covered: draw nothing
+    if (a <= .01) out[0] = Math.min(out[0], -b); else if (b >= L - .01) out[1] = Math.min(out[1], -(L - a));
+  }
+  return out;
 }
 function buildSlab(g, fi, r, holes, Y) {
   for (const c of rectCells(r, holes)) {
@@ -194,14 +242,14 @@ function wallPieces(L, ops, hgt) {
   if (cur < L) pieces.push([cur, L, 0, hgt]);
   return { pieces, list };
 }
-function buildWall(g, fi, w, Y) {
-  const dx = w.x2 - w.x1, dd = w.d2 - w.d1, L = Math.hypot(dx, dd); if (L < .05) return;
-  const ux = dx / L, ud = dd / L, th = Math.atan2(ud, ux);
-  const at = s => [w.x1 + ux * s, w.d1 + ud * s];
+function buildWall(g, fi, w, Y, ext = [0, 0]) {
+  const dx = w.x2 - w.x1, dd = w.d2 - w.d1, L0 = Math.hypot(dx, dd); if (L0 < .05) return;
+  const ux = dx / L0, ud = dd / L0, th = Math.atan2(ud, ux), [e1, e2] = ext, L = L0 + e1 + e2; if (L < .02) return;
+  const at = s => [w.x1 + ux * (s - e1), w.d1 + ud * (s - e1)];
   const kA = `w:${fi}:${w.id}:a`, kB = `w:${fi}:${w.id}:b`;
   if (w.kind === 'rail') return buildRail(g, w, Y, L, ux, ud, th, kA, kB);
   const hgt = FH;
-  const { pieces, list } = wallPieces(L, w.ops || [], hgt);
+  const { pieces, list } = wallPieces(L, (w.ops || []).map(o => ({ ...o, at: o.at + e1 })), hgt);
   for (const [a, b, y0, y1] of pieces) {
     const len = b - a, h = y1 - y0; if (len < .01 || h < .01) continue;
     const [cx, cd] = at((a + b) / 2), [pax, pad] = at(a), [pbx, pbd] = at(b);
@@ -429,7 +477,7 @@ export function groundAt(x, z, feet) {
   return g;
 }
 export const floorOf = y => {
-  const d = dataRef || S.data;
+  const d = S.data || dataRef;
   if (d && y < -1 && d.zones?.length) { let best = -1, by = -1e9; d.zones.forEach((z, k) => { if (z.y <= y + .6 && z.y > by) { by = z.y; best = k; } }); if (best >= 0) return d.floors.length + best; }
   return clamp(Math.floor((y + .6) / FH), 0, Math.max(0, (d ? d.floors.length : H.floors.length) - 1));
 };

@@ -32,7 +32,7 @@ const toP = (sx, sy) => [(sx - P.ox) / P.s, F * (sy - P.oy) / P.s];
 export function openPlan() {
   if (!allFl()[P.fi] || !vis(allFl()[P.fi])) P.fi = 0;
   if (!S.admin && ADMIN_TOOLS.some(t => t[0] === P.tool)) P.tool = 'select';
-  $('#plan').classList.add('show'); $('#plan').classList.toggle('admin', !!S.admin); resize(); if (!P.hist.length) pushHist(); fit(); buildToolbar(); renderProps(); draw();
+  $('#plan').classList.add('show'); $('#plan').classList.toggle('admin', !!S.admin); resize(); if (P.hist[P.hist.length - 1] !== JSON.stringify(S.data)) pushHist(); fit(); buildToolbar(); renderProps(); draw();
 }
 export function closePlan() { $('#plan').classList.remove('show'); P.sel = null; }
 function resize() { const r = cvs.getBoundingClientRect(); cvs.width = r.width * devicePixelRatio; cvs.height = r.height * devicePixelRatio; }

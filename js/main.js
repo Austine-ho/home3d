@@ -1,7 +1,7 @@
 // main: modes, menus, 3D edit, save/load, render loop
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, PRESETS, presetColor, tex, DEG, clamp } from './core.js';
 import { CAT } from './catalog.js';
-import { defaultHouse, migrate } from './data.js';
+import { defaultHouse, migrate, DEFAULT_REV } from './data.js';
 import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH, allFl, entFi, nearPortal } from './house.js';
 import { player, input, on, fx, updatePlayer, requestLock, releaseLock, locked } from './controls.js';
 import { openPlan, closePlan, Plan } from './plan.js';
@@ -10,7 +10,7 @@ import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion, advInt
 // ---------- save / load ----------
 const KEY = 'home3d_design_v2';
 S.save = () => { try { localStorage.setItem(KEY, JSON.stringify(S.data)); } catch (e) { } };
-function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) { const before = d.defaultRev || 0, m = migrate(d); if (before !== m.defaultRev) setTimeout(() => toast(before < 2 ? '已套用你的新 1F 設計' : '已加入地下室、下水道與馬路物件'), 1500); return m; } } catch (e) { } return defaultHouse(); }
+function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) { const before = d.defaultRev || 0, m = migrate(d); if (before !== m.defaultRev) setTimeout(() => toast('已套用新的原版設計（我家設計）'), 1500); return m; } } catch (e) { } return defaultHouse(); }
 S.data = load(); S.save();
 let dirty = false;
 function rebuild() { build(S.data); dirty = false; }
@@ -223,8 +223,8 @@ cvs.addEventListener('contextmenu', e => e.preventDefault());
 // file ops
 $('#btnExport').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S.data)], { type: 'application/json' })); a.download = '我家設計.json'; a.click(); };
 $('#btnImport').onclick = () => $('#fileIn').click();
-$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; d.defaultRev = Math.max(d.defaultRev || 0, 2); S.data = migrate(d); S.save(); rebuild(); renderFloorBtns(); toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
-$('#btnReset').onclick = () => { if (confirm('還原成依影片建立的原始格局？目前的設計會被覆蓋（建議先匯出備份）。')) { S.data = defaultHouse(); S.save(); rebuild(); renderFloorBtns(); Plan.hist = []; toast('已還原'); } };
+$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; d.defaultRev = DEFAULT_REV; for (const k of ['zones', 'portals', 'monsters', 'chests']) d[k] = d[k] || []; S.data = d; S.save(); rebuild(); renderFloorBtns(); Plan.hist = []; toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
+$('#btnReset').onclick = () => { if (confirm('還原成原版設計（我家設計.json）？目前的設計會被覆蓋（建議先匯出備份）。')) { S.data = defaultHouse(); S.save(); rebuild(); renderFloorBtns(); Plan.hist = []; toast('已還原'); } };
 $('#btnShot').onclick = () => { renderer.render(scene, camera); const a = document.createElement('a'); a.href = cvs.toDataURL('image/png'); a.download = '我家截圖.png'; a.click(); };
 $('#btnFull').onclick = () => { const d = document.documentElement; if (!document.fullscreenElement) (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); else document.exitFullscreen?.(); };
 
