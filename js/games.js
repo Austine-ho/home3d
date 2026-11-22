@@ -312,7 +312,7 @@ export function startGame(kind, data, opts = {}) {
 }
 export function stopGame(silent) {
   if (!G.active) return;
-  G.active = false; clearHearts(); for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
+  G.active = false; G.boss = null; $('#bossbar').classList.remove('show'); clearHearts(); for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
   vm.visible = false; beam.visible = false; $('#ghud').classList.remove('show'); $('#shop').classList.remove('show'); $('#banner').classList.remove('show'); $('#vig').classList.remove('show');
   clearAdventure(); clearHide(); lightCfg.lockFog = false; $('#gextra').innerHTML = ''; $('#dialog').classList.remove('show');
   if (flashlight) flashlight.intensity = 0; scene.fog = null; lightCfg.flicker = 0; lightCfg.intensity = 8; Snd.droneOff(); setNight(false);
@@ -759,8 +759,8 @@ export function updateGame(dt) {
     $('#vig').style.opacity = near ? 1 : .7;
   }
   if (G.scareT > 0) { G.scareT -= dt; if (G.scareT <= 0) { lightCfg.flicker = G.kind === 'ghost' ? .03 : 0; camera.fov = 72; camera.updateProjectionMatrix(); } else { camera.fov += (72 - camera.fov) * dt * 3; camera.updateProjectionMatrix(); } }
-  // boss bar
-  if (G.boss) $('#bossfill').style.width = (G.boss.hp / G.boss.max * 100) + '%';
+  // boss bar: only while that boss is still alive in this game (and, in adventure, on your floor and nearby)
+  syncBossBar();
   // nearest enemy arrow
   const arrow = $('#garrow');
   if (G.kind !== 'destroy' && G.kind !== 'adventure' && G.kind !== 'hide' && G.enemies.length) {
@@ -772,6 +772,17 @@ export function updateGame(dt) {
   hudT -= dt; if (hudT <= 0) { hudT = .25; updateHUD(); checkCollapse(); }
 }
 
+function syncBossBar() {
+  const alive = e => e && !e.dead && e.hp > 0 && G.enemies.includes(e);
+  if (G.kind === 'adventure') {   // nearest boss on your floor within 25 m
+    let best = null, bd = 25; const pf = floorOf(player.pos.y);
+    for (const e of G.enemies) if (e.d.boss && alive(e) && floorOf(e.base ?? e.mesh.position.y) === pf) { const d = e.mesh.position.distanceTo(player.pos); if (d < bd) { bd = d; best = e; } }
+    G.boss = best; if (best) $('#bossname').textContent = best.d.n;
+  } else if (!alive(G.boss)) G.boss = null;
+  const show = !!G.boss;
+  $('#bossbar').classList.toggle('show', show);
+  if (show) $('#bossfill').style.width = Math.max(0, G.boss.hp / G.boss.max * 100) + '%';
+}
 // ================= horror events: the further you get, the more often something goes wrong =================
 function behindPlayer(dist = 4) {
   const f = camFwd(); for (let i = 0; i < 12; i++) { const a = Math.atan2(-f.x, -f.z) + (Math.random() - .5) * 1.6, x = player.pos.x + Math.sin(a) * dist, z = player.pos.z + Math.cos(a) * dist; if (!hits(x, z, player.pos.y, .35, true) && groundAt(x, z, player.pos.y + .3) > player.pos.y - .5) return new THREE.Vector3(x, player.pos.y, z); dist *= .85; }
