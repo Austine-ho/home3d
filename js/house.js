@@ -222,14 +222,38 @@ function buildOpening(g, fi, w, o, Y, at, ux, ud, th) {
   if (made.length === 2) { made[0].pair = made[1]; made[1].pair = made[0]; }
 }
 function buildStairs(g, st) {
-  const Y = floorY(st.floor), { steps } = stairGeom(st), m = P('concrete'), nose = M('#6d6b66');
+  const Y = floorY(st.floor), { steps } = stairGeom(st);
+  const top = P(st.mat || (st.floor ? 'lightwood' : 'concrete')), under = M('#ddd8ce', { r: .95 }), nose = M('#5a4a3a', { r: .6 }), wallM = M('#ebe5d8', { r: .9 });
+  const half = st.w / 2, f1s = st.d + st.len - .9, f1e = st.d + .7, f2e = st.d + st.len - .37, cx = st.x + half;
+  // steps are slabs (not solid columns) so the flight above never fills the space of the flight below
   for (const s of steps) {
-    const w = s.x1 - s.x0, dd = s.d1 - s.d0;
-    const mesh = new THREE.Mesh(BG(w, s.top, dd), m); mesh.position.set((s.x0 + s.x1) / 2, Y + s.top / 2, -(s.d0 + s.d1) / 2); g.add(mesh);
-    const b = new THREE.Box3(new THREE.Vector3(s.x0, Y, -s.d1), new THREE.Vector3(s.x1, Y + s.top, -s.d0)); b.step = 1; H.steps.push(b);
+    const w = s.x1 - s.x0, dd = s.d1 - s.d0, th = s.landing ? .22 : Math.min(s.top, .4);
+    const mesh = new THREE.Mesh(BG(w, th, dd), [under, under, top, under, under, under]);
+    mesh.position.set((s.x0 + s.x1) / 2, Y + s.top - th / 2, -(s.d0 + s.d1) / 2); g.add(mesh);
+    if (!s.landing) { const nz = s.x0 > cx ? -s.d0 - .015 : -s.d1 + .015; bx(g, w, .03, .03, (s.x0 + s.x1) / 2, Y + s.top - .03, nz, nose); }
+    const b = new THREE.Box3(new THREE.Vector3(s.x0, Y + s.top - th, -s.d1), new THREE.Vector3(s.x1, Y + s.top, -s.d0)); b.step = 1; H.steps.push(b);
   }
-  // handrail along the outer wall side of flight 2 (visual only)
-  bx(g, .04, .04, st.len - 1.1, st.x + st.w - .06, Y + 2.4, -(st.d + st.len / 2 + .2), M('#888', { m: .6 }));
+  // centre wall between the two flights (full storey high)
+  const wl = f1s - f1e;
+  const cw = new THREE.Mesh(BG(.1, FH, wl), wallM); cw.position.set(cx, Y + FH / 2, -(f1e + wl / 2)); g.add(cw);
+  addSeg(cx, f1e, cx, f1s, Y, Y + FH, .05);
+  // sloped handrails along the outer side of each flight
+  const rail = M('#6b4a35', { r: .5 }), r = FH / 16;
+  const handrail = (x, d0, y0, d1, y1) => {
+    const a = new THREE.Vector3(x, Y + y0 + .9, -d0), b = new THREE.Vector3(x, Y + y1 + .9, -d1), len = a.distanceTo(b);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, len, 8), rail); m.userData.own = 1;
+    m.position.copy(a).add(b).multiplyScalar(.5); m.lookAt(b); m.rotateX(Math.PI / 2); g.add(m);
+    for (const [p, h] of [[a, y0], [b, y1]]) { const post = new THREE.Mesh(BG(.03, .9, .03), rail); post.position.set(x, p.y - .45, p.z); g.add(post); }
+  };
+  handrail(st.x + .08, f1s, r, f1e, 7 * r);
+  handrail(st.x + st.w - .08, f1e, 7 * r, f2e, 16 * r);
+  // guard rails around the opening on the floor above when no further stair continues from there
+  const nextFloor = st.floor + 1, hasNext = dataRef.stairs.some(o => o.floor === nextFloor);
+  if (dataRef.floors[nextFloor] && !hasNext) {
+    const Y2 = floorY(nextFloor), g2 = H.floors[nextFloor] || g;
+    const guard = (x1, d1, x2, d2) => buildRail(g2, { x1, d1, x2, d2 }, Y2, Math.hypot(x2 - x1, d2 - d1), (x2 - x1) / Math.hypot(x2 - x1, d2 - d1), (d2 - d1) / Math.hypot(x2 - x1, d2 - d1), Math.atan2(d2 - d1, x2 - x1));
+    guard(st.x, f1s, cx, f1s); guard(cx, f1s, cx, f2e - (f2e - f1e) / 9 - .02); // leave the top step open to walk across
+  }
 }
 function addLamp(g, x, y, z, name) {
   const lm = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e0', emissiveIntensity: 1.2 });
