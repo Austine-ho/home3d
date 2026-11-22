@@ -25,15 +25,37 @@ export function setNight(v) {
 }
 
 // ---------- stairs ----------
+// A U-shaped stair is defined in a local frame (width w along lx, length len along ld, flight 1 starts at
+// ld = len and climbs towards ld = 0, landing at ld = 0, flight 2 climbs back). rot (0/90/180/270, clockwise
+// on the plan) and flip (mirror left/right) place it in the house; x,d is the top-left corner of its bounds.
+export function stairBounds(st) {
+  const r = (((st.rot || 0) % 360) + 360) % 360, side = r === 90 || r === 270;
+  return { x0: st.x, d0: st.d, x1: st.x + (side ? st.len : st.w), d1: st.d + (side ? st.w : st.len) };
+}
+function stairXf(st) {
+  const r = (((st.rot || 0) % 360) + 360) % 360, w = st.w, L = st.len, f = !!st.flip;
+  const pt = (lx, ld) => { if (f) lx = w - lx; let x = lx, d = ld; if (r === 90) { x = L - ld; d = lx; } else if (r === 180) { x = w - lx; d = L - ld; } else if (r === 270) { x = ld; d = w - lx; } return [st.x + x, st.d + d]; };
+  const vec = (dx, dd) => { if (f) dx = -dx; if (r === 90) return [-dd, dx]; if (r === 180) return [-dx, -dd]; if (r === 270) return [dd, -dx]; return [dx, dd]; };
+  const rect = a => { const p = pt(a.x0, a.d0), q = pt(a.x1, a.d1); return { ...a, x0: Math.min(p[0], q[0]), x1: Math.max(p[0], q[0]), d0: Math.min(p[1], q[1]), d1: Math.max(p[1], q[1]) }; };
+  return { pt, vec, rect };
+}
 export function stairGeom(st) {
-  const { x, d, w, len } = st, half = w / 2, n1 = 7, n2 = 9, r = FH / 16;
-  const f1s = d + len - 0.9, f1e = d + 0.7, run1 = (f1s - f1e) / n1, f2e = d + len - 0.37, run2 = (f2e - f1e) / n2;
-  const steps = [];
-  for (let i = 0; i < n1; i++) steps.push({ x0: x + .03, x1: x + half - .02, d0: f1s - (i + 1) * run1, d1: f1s - i * run1, top: (i + 1) * r });
-  steps.push({ x0: x + .03, x1: x + w - .03, d0: d + .03, d1: f1e, top: n1 * r, landing: 1 });
-  for (let i = 0; i < n2; i++) steps.push({ x0: x + half + .02, x1: x + w - .03, d0: f1e + i * run2, d1: f1e + (i + 1) * run2, top: (n1 + i + 1) * r });
-  const holes = [{ x0: x, d0: d, x1: x + w, d1: f1s }, { x0: x + half, d0: f1s, x1: x + w, d1: f2e }];
-  return { steps, holes };
+  const w = st.w, len = st.len, half = w / 2, n1 = 7, n2 = 9, r = FH / 16;
+  const f1s = len - 0.9, f1e = 0.7, run1 = (f1s - f1e) / n1, f2e = len - 0.37, run2 = (f2e - f1e) / n2;
+  const X = stairXf(st), L = [];
+  for (let i = 0; i < n1; i++) L.push({ x0: .03, x1: half - .02, d0: f1s - (i + 1) * run1, d1: f1s - i * run1, top: (i + 1) * r, down: 1 });
+  L.push({ x0: .03, x1: w - .03, d0: .03, d1: f1e, top: n1 * r, landing: 1 });
+  for (let i = 0; i < n2; i++) L.push({ x0: half + .02, x1: w - .03, d0: f1e + i * run2, d1: f1e + (i + 1) * run2, top: (n1 + i + 1) * r, down: -1 });
+  const steps = L.map(s => { const o = X.rect(s); if (s.down) o.dv = X.vec(0, s.down); return o; });
+  const holes = [X.rect({ x0: 0, d0: 0, x1: w, d1: f1s }), X.rect({ x0: half, d0: f1s, x1: w, d1: f2e })];
+  return {
+    steps, holes,
+    wall: [X.pt(half, f1e), X.pt(half, f1s)],
+    rails: [[X.pt(.08, f1s), r, X.pt(.08, f1e), 7 * r], [X.pt(w - .08, f1e), 7 * r, X.pt(w - .08, f2e), 16 * r]],
+    guards: [[X.pt(0, f1s), X.pt(half, f1s)], [X.pt(half, f1s), X.pt(half, f2e - run2 - .02)]],
+    path: [X.pt(w * .25, len - .15), X.pt(w * .25, .35), X.pt(w * .75, .35), X.pt(w * .75, f2e)],
+    start: X.pt(w * .25, len - .25), arrive: X.pt(w * .75, Math.min(len - .1, f2e + .15)), bounds: stairBounds(st),
+  };
 }
 
 // ---------- helpers ----------
@@ -222,37 +244,37 @@ function buildOpening(g, fi, w, o, Y, at, ux, ud, th) {
   if (made.length === 2) { made[0].pair = made[1]; made[1].pair = made[0]; }
 }
 function buildStairs(g, st) {
-  const Y = floorY(st.floor), { steps } = stairGeom(st);
+  const Y = floorY(st.floor), G = stairGeom(st);
   const top = P(st.mat || (st.floor ? 'lightwood' : 'concrete')), under = M('#ddd8ce', { r: .95 }), nose = M('#5a4a3a', { r: .6 }), wallM = M('#ebe5d8', { r: .9 });
-  const half = st.w / 2, f1s = st.d + st.len - .9, f1e = st.d + .7, f2e = st.d + st.len - .37, cx = st.x + half;
   // steps are slabs (not solid columns) so the flight above never fills the space of the flight below
-  for (const s of steps) {
+  for (const s of G.steps) {
     const w = s.x1 - s.x0, dd = s.d1 - s.d0, th = s.landing ? .22 : Math.min(s.top, .4);
     const mesh = new THREE.Mesh(BG(w, th, dd), [under, under, top, under, under, under]);
     mesh.position.set((s.x0 + s.x1) / 2, Y + s.top - th / 2, -(s.d0 + s.d1) / 2); g.add(mesh);
-    if (!s.landing) { const nz = s.x0 > cx ? -s.d0 - .015 : -s.d1 + .015; bx(g, w, .03, .03, (s.x0 + s.x1) / 2, Y + s.top - .03, nz, nose); }
+    if (s.dv) { // nosing on the downhill edge
+      const [vx, vd] = s.dv;
+      if (vd) bx(g, w, .03, .03, (s.x0 + s.x1) / 2, Y + s.top - .03, -(vd > 0 ? s.d1 - .015 : s.d0 + .015), nose);
+      else bx(g, .03, .03, dd, vx > 0 ? s.x1 - .015 : s.x0 + .015, Y + s.top - .03, -(s.d0 + s.d1) / 2, nose);
+    }
     const b = new THREE.Box3(new THREE.Vector3(s.x0, Y + s.top - th, -s.d1), new THREE.Vector3(s.x1, Y + s.top, -s.d0)); b.step = 1; H.steps.push(b);
   }
   // centre wall between the two flights (full storey high)
-  const wl = f1s - f1e;
-  const cw = new THREE.Mesh(BG(.1, FH, wl), wallM); cw.position.set(cx, Y + FH / 2, -(f1e + wl / 2)); g.add(cw);
-  addSeg(cx, f1e, cx, f1s, Y, Y + FH, .05);
+  const [[ax, ad], [bx_, bd]] = G.wall, alongX = Math.abs(bx_ - ax) > Math.abs(bd - ad), wl = Math.hypot(bx_ - ax, bd - ad);
+  const cw = new THREE.Mesh(alongX ? BG(wl, FH, .1) : BG(.1, FH, wl), wallM); cw.position.set((ax + bx_) / 2, Y + FH / 2, -(ad + bd) / 2); g.add(cw);
+  addSeg(ax, ad, bx_, bd, Y, Y + FH, .05);
   // sloped handrails along the outer side of each flight
-  const rail = M('#6b4a35', { r: .5 }), r = FH / 16;
-  const handrail = (x, d0, y0, d1, y1) => {
-    const a = new THREE.Vector3(x, Y + y0 + .9, -d0), b = new THREE.Vector3(x, Y + y1 + .9, -d1), len = a.distanceTo(b);
+  const rail = M('#6b4a35', { r: .5 });
+  for (const [[x0, d0], y0, [x1, d1], y1] of G.rails) {
+    const a = new THREE.Vector3(x0, Y + y0 + .9, -d0), b = new THREE.Vector3(x1, Y + y1 + .9, -d1), len = a.distanceTo(b);
     const m = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, len, 8), rail); m.userData.own = 1;
     m.position.copy(a).add(b).multiplyScalar(.5); m.lookAt(b); m.rotateX(Math.PI / 2); g.add(m);
-    for (const [p, h] of [[a, y0], [b, y1]]) { const post = new THREE.Mesh(BG(.03, .9, .03), rail); post.position.set(x, p.y - .45, p.z); g.add(post); }
-  };
-  handrail(st.x + .08, f1s, r, f1e, 7 * r);
-  handrail(st.x + st.w - .08, f1e, 7 * r, f2e, 16 * r);
-  // guard rails around the opening on the floor above when no further stair continues from there
+    for (const p of [a, b]) { const post = new THREE.Mesh(BG(.03, .9, .03), rail); post.position.set(p.x, p.y - .45, p.z); g.add(post); }
+  }
+  // guard rails around the opening on the floor above when no further stair starts there
   const nextFloor = st.floor + 1, hasNext = dataRef.stairs.some(o => o.floor === nextFloor);
   if (dataRef.floors[nextFloor] && !hasNext) {
     const Y2 = floorY(nextFloor), g2 = H.floors[nextFloor] || g;
-    const guard = (x1, d1, x2, d2) => buildRail(g2, { x1, d1, x2, d2 }, Y2, Math.hypot(x2 - x1, d2 - d1), (x2 - x1) / Math.hypot(x2 - x1, d2 - d1), (d2 - d1) / Math.hypot(x2 - x1, d2 - d1), Math.atan2(d2 - d1, x2 - x1));
-    guard(st.x, f1s, cx, f1s); guard(cx, f1s, cx, f2e - (f2e - f1e) / 9 - .02); // leave the top step open to walk across
+    for (const [[x1, d1], [x2, d2]] of G.guards) { const L = Math.hypot(x2 - x1, d2 - d1); if (L > .1) buildRail(g2, { x1, d1, x2, d2 }, Y2, L, (x2 - x1) / L, (d2 - d1) / L, Math.atan2(d2 - d1, x2 - x1)); }
   }
 }
 function addLamp(g, x, y, z, name) {

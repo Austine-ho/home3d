@@ -212,8 +212,39 @@ const PROF_KEY = k => 'home_game_' + k;
 const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer' };
 function loadProf(kind) {
   let p; try { p = JSON.parse(localStorage.getItem(PROF_KEY(kind))); } catch (e) { }
-  if (!p) p = { money: kind === 'destroy' ? 200 : 0, owned: { [DEF_W[kind]]: 0 }, cur: DEF_W[kind], level: 1, hpLv: 0, spdLv: 0, best: 0 };
+  if (!p) p = { money: kind === 'destroy' ? 200 : 0, owned: { [DEF_W[kind]]: 0 }, cur: DEF_W[kind], level: 1, hpLv: 0, spdLv: 0, defLv: 0, regLv: 0, potions: 2, best: 0 };
   return p;
+}
+const maxHpOf = p => 100 + (p.hpLv || 0) * 40;
+const hpCost = p => 120 + 110 * (p.hpLv || 0);
+const potCost = () => 60;
+export function usePotion() {
+  if (!G.active || G.kind === 'destroy' || G.paused) return;
+  if (!G.prof.potions) return toast('沒有藥水了，到商店買');
+  if (G.hp >= G.maxHp) return toast('生命已經是滿的');
+  G.prof.potions--; G.hp = Math.min(G.maxHp, G.hp + G.maxHp * .6); saveProf(); updateHUD();
+  Snd.tone(523, .15, 'triangle', .2); Snd.tone(784, .25, 'triangle', .2, null, .12);
+  const f = $('#flash'); f.style.background = 'rgba(60,255,120,.3)'; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 200);
+  burst(player.pos.clone().add(new THREE.Vector3(0, 1, 0)), '#66ff66', 14, 2, .06, .8, -1, { glow: 1 });
+}
+// heart pickups dropped by enemies
+const hearts = [];
+function dropHeart(pos) {
+  const g = new THREE.Group(), m = M('#ff3355', { e: '#ff2244', ei: .9, r: .3 });
+  sp(g, .09, -.06, 0, 0, m); sp(g, .09, .06, 0, 0, m); const c = new THREE.Mesh(new THREE.ConeGeometry(.13, .18, 12), m); c.rotation.z = Math.PI; c.position.y = -.1; g.add(c);
+  g.position.copy(pos); g.position.y = groundAt(pos.x, pos.z, pos.y + .5) + .45; g.userData.base = g.position.y; g.userData.t = 0;
+  scene.add(g); hearts.push(g);
+}
+function clearHearts() { for (const h of hearts) scene.remove(h); hearts.length = 0; }
+function updateHearts(dt) {
+  for (const h of hearts.slice()) {
+    h.userData.t += dt; h.rotation.y += dt * 3; h.position.y = h.userData.base + Math.sin(h.userData.t * 3) * .06;
+    if (h.userData.t > 25) { scene.remove(h); hearts.splice(hearts.indexOf(h), 1); continue; }
+    if (Math.hypot(h.position.x - player.pos.x, h.position.z - player.pos.z) < .8 && Math.abs(h.position.y - player.pos.y - .45) < 1.2) {
+      scene.remove(h); hearts.splice(hearts.indexOf(h), 1);
+      const heal = Math.round(G.maxHp * .25); G.hp = Math.min(G.maxHp, G.hp + heal); floatText(`+${heal}❤️`, h.position); Snd.tone(880, .12, 'sine', .2); Snd.tone(1175, .2, 'sine', .2, null, .1); updateHUD();
+    }
+  }
 }
 const saveProf = () => { try { localStorage.setItem(PROF_KEY(G.kind), JSON.stringify(G.prof)); } catch (e) { } };
 const W = () => WEAPONS[G.prof.cur];
@@ -226,9 +257,10 @@ export function startGame(kind, data) {
   G.kind = kind; G.active = true; G.paused = false; G.prof = loadProf(kind); G.t = 0; G.collapse = 0;
   build(data, { destruct: kind === 'destroy' });
   worldTargets = kind === 'destroy' ? null : [...H.wallMeshes, ...H.slabMeshes];
-  G.maxHp = 100 + G.prof.hpLv * 25; G.hp = G.maxHp; player.speed = 2.4 * (1 + G.prof.spdLv * .08); player.run = 4.4 * (1 + G.prof.spdLv * .08);
+  const pf = G.prof; pf.defLv ??= 0; pf.regLv ??= 0; pf.potions ??= 2;
+  G.maxHp = maxHpOf(pf); G.hp = G.maxHp; clearHearts(); player.speed = 2.4 * (1 + G.prof.spdLv * .08); player.run = 4.4 * (1 + G.prof.spdLv * .08);
   vm.visible = true; buildVM(G.prof.cur);
-  $('#ghud').classList.add('show'); $('#ghud').dataset.kind = kind;
+  $('#ghud').classList.add('show'); $('#ghud').dataset.kind = kind; document.body.dataset.kind = kind;
   if (kind === 'ghost') {
     setNight(true); lightCfg.intensity = 3; lightCfg.flicker = .03; H.lamps.forEach(l => setLamp(l, Math.random() < .5));
     scene.fog = new THREE.FogExp2('#000000', .09);
@@ -241,7 +273,7 @@ export function startGame(kind, data) {
 }
 export function stopGame(silent) {
   if (!G.active) return;
-  G.active = false; for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
+  G.active = false; clearHearts(); for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
   vm.visible = false; beam.visible = false; $('#ghud').classList.remove('show'); $('#shop').classList.remove('show'); $('#banner').classList.remove('show'); $('#vig').classList.remove('show');
   if (flashlight) flashlight.intensity = 0; scene.fog = null; lightCfg.flicker = 0; lightCfg.intensity = 8; Snd.droneOff(); setNight(false);
   H.lamps.forEach(l => setLamp(l, true));
@@ -375,6 +407,8 @@ function killEnemy(e) {
   if (e.d.ghost) { burst(pos, '#e8f6ff', 18, 4, .1, 1.2, -1.5, { glow: 1 }); Snd.tone(600, .5, 'sine', .2, 1500); }
   else { burst(pos, '#6b8a2a', 10, 3, .08, .8); Snd.squish(); }
   const m = Math.round(e.d.money * (1 + .1 * (G.level - 1))); earn(m); floatText(`+$${m}`, pos);
+  if (e.d.boss) for (let i = 0; i < 3; i++) dropHeart(pos.clone().add(new THREE.Vector3((Math.random() - .5) * 2, 0, (Math.random() - .5) * 2)));
+  else if (Math.random() < .14) dropHeart(pos);
   if (e === G.boss) { G.boss = null; $('#bossbar').classList.remove('show'); fx.shake = 1.2; Snd.boom(1.5); for (const x of G.enemies.slice()) killEnemy(x); G.queue = 0; }
   if (!G.enemies.length && (G.kind === 'clean' || G.queue <= 0)) setTimeout(() => { if (G.active && !G.enemies.length && (G.kind === 'clean' || G.queue <= 0)) levelClear(); }, 600);
 }
@@ -485,7 +519,7 @@ function updateEnemyShots() {
 }
 function hurtPlayer(n) {
   if (G.paused) return;
-  G.hp -= n; Snd.hurt(); fx.shake = Math.max(fx.shake, .5); vibrate(60);
+  G.hp -= n * (1 - .08 * (G.prof.defLv || 0)); Snd.hurt(); fx.shake = Math.max(fx.shake, .5); vibrate(60);
   const f = $('#flash'); f.style.background = 'rgba(200,0,0,.45)'; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 150);
   if (G.hp <= 0) { G.hp = 0; playerDie(); }
   updateHUD();
@@ -532,7 +566,7 @@ function updateHUD() {
     $('#hpbar').style.display = 'none'; $('#gextra').innerHTML = '<button id="gRestore">♻️ 復原</button><button id="gShop">🛒 商店</button>';
     $('#gRestore').onclick = () => restoreHouse(); $('#gShop').onclick = () => openShop(false);
   } else {
-    $('#hpbar').style.display = 'block'; $('#hpfill').style.width = (G.hp / G.maxHp * 100) + '%'; $('#hptext').textContent = `${Math.ceil(G.hp)} / ${G.maxHp}`;
+    $('#hpbar').style.display = 'block'; $('#hpfill').style.width = (G.hp / G.maxHp * 100) + '%'; $('#hptext').textContent = `${Math.ceil(G.hp)} / ${G.maxHp}`; $('#potions').textContent = `🧪 ×${G.prof.potions}`;
     $('#glevel').textContent = `第 ${G.level} 關`;
     const per = {}; for (const e of G.enemies) { const f = floorOf(e.base); per[f] = (per[f] || 0) + 1; }
     const fn = i => S.data.floors[i]?.name || i;
@@ -557,8 +591,12 @@ export function openShop(betweenLevels, fromDeath) {
   }
   h += '</div>';
   if (G.kind !== 'destroy') {
-    const hc = 150 * (p.hpLv + 1), sc = 200 * (p.spdLv + 1);
-    h += `<div class="items"><div class="item"><div class="ic">❤️</div><div class="info"><b>最大生命 +25</b><small>目前 ${100 + p.hpLv * 25}</small></div><button data-hp>$${hc}</button></div>
+    const hc = hpCost(p), sc = 200 * (p.spdLv + 1), dc = 180 * (p.defLv + 1), rc = 160 * (p.regLv + 1);
+    h += `<h3 style="margin:12px 0 6px">💪 主角強化</h3><div class="items">
+      <div class="item"><div class="ic">❤️</div><div class="info"><b>最大生命 +40</b><small>目前 ${maxHpOf(p)}（無上限，每關開始會補滿）</small></div><button data-hp>$${hc}</button></div>
+      <div class="item"><div class="ic">🧪</div><div class="info"><b>補血藥水</b><small>回復 60% 生命，持有 ${p.potions}/9（按 H 或 🧪 使用）</small></div>${p.potions < 9 ? `<button data-pot>$${potCost()}</button>` : '<button disabled>已滿</button>'}</div>
+      <div class="item"><div class="ic">🛡️</div><div class="info"><b>防禦 Lv${p.defLv}</b><small>受到傷害 -${p.defLv * 8}%（每級 -8%，最多 -48%）</small></div>${p.defLv < 6 ? `<button data-def>$${dc}</button>` : '<button disabled>滿級</button>'}</div>
+      <div class="item"><div class="ic">💚</div><div class="info"><b>回血 Lv${p.regLv}</b><small>戰鬥中也會慢慢回血，脫離戰鬥回更快</small></div>${p.regLv < 6 ? `<button data-reg>$${rc}</button>` : '<button disabled>滿級</button>'}</div>
       <div class="item"><div class="ic">👟</div><div class="info"><b>移動速度 +8%</b><small>Lv${p.spdLv}</small></div>${p.spdLv < 6 ? `<button data-spd>$${sc}</button>` : '<button disabled>滿級</button>'}</div></div>`;
   }
   h += `<div class="rowb">${betweenLevels ? `<button class="go" data-next>▶ 第 ${G.prof.level} 關</button>` : fromDeath ? `<button class="go" data-retry>🔁 重新挑戰</button>` : `<button class="go" data-close>▶ 繼續</button>`}</div>`;
@@ -567,7 +605,11 @@ export function openShop(betweenLevels, fromDeath) {
   el.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => { const id = b.dataset.buy, w = WEAPONS[id]; if (p.money < w.price) return toast('錢不夠喔'); p.money -= w.price; p.owned[id] = 0; p.cur = id; Snd.buy(); buildVM(id); renderWeaponBar(); saveProf(); reopen(); });
   el.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { const id = b.dataset.up, c = upCost(WEAPONS[id], p.owned[id]); if (p.money < c) return toast('錢不夠喔'); p.money -= c; p.owned[id]++; Snd.buy(); renderWeaponBar(); saveProf(); reopen(); });
   el.querySelectorAll('[data-eq]').forEach(b => b.onclick = () => { equip(b.dataset.eq); reopen(); });
-  const hp = el.querySelector('[data-hp]'); if (hp) hp.onclick = () => { const c = 150 * (p.hpLv + 1); if (p.money < c) return toast('錢不夠喔'); p.money -= c; p.hpLv++; G.maxHp = 100 + p.hpLv * 25; G.hp = G.maxHp; Snd.buy(); saveProf(); reopen(); };
+  const buyUp = (sel, cost, fn) => { const b = el.querySelector(sel); if (b) b.onclick = () => { const c = cost(); if (p.money < c) return toast('錢不夠喔'); p.money -= c; fn(); Snd.buy(); saveProf(); updateHUD(); reopen(); }; };
+  buyUp('[data-hp]', () => hpCost(p), () => { p.hpLv++; G.maxHp = maxHpOf(p); G.hp = G.maxHp; });
+  buyUp('[data-pot]', potCost, () => { p.potions++; });
+  buyUp('[data-def]', () => 180 * (p.defLv + 1), () => { p.defLv++; });
+  buyUp('[data-reg]', () => 160 * (p.regLv + 1), () => { p.regLv++; });
   const sd = el.querySelector('[data-spd]'); if (sd) sd.onclick = () => { const c = 200 * (p.spdLv + 1); if (p.money < c) return toast('錢不夠喔'); p.money -= c; p.spdLv++; player.speed = 2.4 * (1 + p.spdLv * .08); player.run = 4.4 * (1 + p.spdLv * .08); Snd.buy(); saveProf(); reopen(); };
   const close = () => { el.classList.remove('show'); G.paused = false; updateHUD(); };
   const nx = el.querySelector('[data-next]'); if (nx) nx.onclick = () => { close(); startLevel(G.prof.level); };
@@ -597,7 +639,9 @@ export function updateGame(dt) {
   // view model swing
   const g = vm.userData.g; if (g) { swingT = Math.max(0, swingT - dt * 4); const k = Math.sin(swingT * Math.PI); g.rotation.x = (g.userData.bx ?? .1) - k * 1.4; g.rotation.z = -k * .6; g.position.y = Math.sin(G.t * 8) * .005; }
   updateProjs(dt); updateEnemyShots(); updateEnemies(dt); updateFallers(dt);
-  if (G.kind !== 'destroy' && G.hp < G.maxHp && !G.enemies.some(e => e.mesh.position.distanceTo(player.pos) < 5)) G.hp = Math.min(G.maxHp, G.hp + dt * 2);
+  if (G.kind !== 'destroy' && G.hp < G.maxHp && !G.enemies.some(e => e.mesh.position.distanceTo(player.pos) < 5)) G.hp = Math.min(G.maxHp, G.hp + dt * (2 + G.prof.regLv * 2.5));
+  if (G.kind !== 'destroy' && G.prof.regLv && G.hp < G.maxHp) G.hp = Math.min(G.maxHp, G.hp + dt * G.prof.regLv * .6);
+  updateHearts(dt);
   // ghost spawner
   if (G.kind === 'ghost') {
     G.spawnT -= dt;

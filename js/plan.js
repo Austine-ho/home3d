@@ -1,13 +1,13 @@
 // 2D floor-plan editor: rooms, walls, rails, doors, windows, furniture, stairs, floors
 import { S, $, toast, PRESETS, presetColor, clamp } from './core.js';
 import { CAT, footprint } from './catalog.js';
-import { stairGeom, DOOR_STYLE_NAMES } from './house.js';
+import { stairGeom, stairBounds, DOOR_STYLE_NAMES } from './house.js';
 
 const cvs = $('#planCanvas'), ctx = cvs.getContext('2d');
 const P = { fi: 0, tool: 'select', sel: null, s: 40, ox: 0, oy: 0, drag: null, snap: true, hist: [], fut: [], onChange: null, placing: null };
 export const Plan = P;
 const OPS = { door: '單開門', door2: '雙開門', sliding: '拉門', window: '窗戶', opening: '開口(無門)' };
-const TOOLS = [['select', '👆', '選取/移動'], ['wall', '🧱', '畫牆'], ['rail', '🚧', '欄杆'], ['room', '⬛', '新增空間'], ['door', '🚪', '加門'], ['window', '🪟', '加窗'], ['opening', '⬜', '加開口'], ['furn', '🛋', '加家具']];
+const TOOLS = [['select', '👆', '選取/移動'], ['wall', '🧱', '畫牆'], ['rail', '🚧', '欄杆'], ['room', '⬛', '新增空間'], ['door', '🚪', '加門'], ['window', '🪟', '加窗'], ['opening', '⬜', '加開口'], ['stair', '🪜', '加樓梯'], ['furn', '🛋', '加家具']];
 const nid = p => p + (S.data.nextId++);
 const fl = () => S.data.floors[P.fi];
 const snapV = v => P.snap ? Math.round(v / .05) * .05 : Math.round(v / .01) * .01;
@@ -44,7 +44,7 @@ function buildToolbar() {
   $('#pSnap').classList.toggle('on', P.snap);
 }
 function hintTool() {
-  const h = { select: '點選物件後拖曳；拖曳空白處平移；雙指縮放', wall: '按住拖曳畫一道牆（自動對齊水平/垂直）', rail: '按住拖曳畫欄杆', room: '按住拖曳框出新的空間', door: '點一下牆壁加入門', window: '點一下牆壁加入窗戶', opening: '點一下牆壁加入無門開口', furn: '從清單選一件家具' }[P.tool];
+  const h = { select: '點選物件後拖曳；拖曳空白處平移；雙指縮放', wall: '按住拖曳畫一道牆（自動對齊水平/垂直）', rail: '按住拖曳畫欄杆', room: '按住拖曳框出新的空間', door: '點一下牆壁加入門', window: '點一下牆壁加入窗戶', opening: '點一下牆壁加入無門開口', stair: '點一下放置樓梯（通往上一層）', furn: '從清單選一件家具' }[P.tool];
   $('#phint').textContent = h;
 }
 $('#pUndo').onclick = undo; $('#pRedo').onclick = redo; $('#pFit').onclick = () => { fit(); draw(); };
@@ -85,16 +85,19 @@ function draw() {
   }
   // stairs
   for (const st of S.data.stairs) {
+    const G = stairGeom(st), B = G.bounds, cx = (B.x0 + B.x1) / 2, cd = (B.d0 + B.d1) / 2;
     if (st.floor === P.fi) {
-      const { steps } = stairGeom(st);
-      for (const s of steps) { const [a, b] = toS(s.x0, s.d0), [c, d] = toS(s.x1, s.d1); ctx.fillStyle = `rgba(160,160,160,${.25 + s.top / 6})`; ctx.fillRect(a, b, c - a, d - b); ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(a, b, c - a, d - b); }
-      label('樓梯 ↑', st.x + st.w / 2, st.d + st.len / 2, '#fff');
+      for (const s of G.steps) { const [a, b] = toS(s.x0, s.d0), [c, d] = toS(s.x1, s.d1); ctx.fillStyle = `rgba(170,170,170,${.25 + s.top / 6})`; ctx.fillRect(a, b, c - a, d - b); ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(a, b, c - a, d - b); }
+      ctx.strokeStyle = '#ffd08a'; ctx.lineWidth = 2; ctx.beginPath(); G.path.forEach((p, i) => i ? ctx.lineTo(...toS(...p)) : ctx.moveTo(...toS(...p))); ctx.stroke();
+      const [ex, ey] = toS(...G.path[3]), [px, py] = toS(...G.path[2]), an = Math.atan2(ey - py, ex - px);
+      ctx.fillStyle = '#ffd08a'; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - 10 * Math.cos(an - .5), ey - 10 * Math.sin(an - .5)); ctx.lineTo(ex - 10 * Math.cos(an + .5), ey - 10 * Math.sin(an + .5)); ctx.fill();
+      label(`樓梯 ↑ ${S.data.floors[st.floor + 1]?.name || ''}`, cx, cd, '#fff');
     }
     if (st.floor === P.fi - 1) {
-      for (const h of stairGeom(st).holes) { const [a, b] = toS(h.x0, h.d0), [c, d] = toS(h.x1, h.d1); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(a, b, c - a, d - b); }
-      label('樓梯口 ↓', st.x + st.w / 2, st.d + 1, '#aaa');
+      for (const h of G.holes) { const [a, b] = toS(h.x0, h.d0), [c, d] = toS(h.x1, h.d1); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(a, b, c - a, d - b); }
+      const [ax, ad] = G.arrive; label('樓梯口 ↓', cx, cd, '#aaa'); const [sx, sy] = toS(ax, ad); ctx.fillStyle = '#7cff9a'; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, 7); ctx.fill();
     }
-    if (st.floor === P.fi || st.floor === P.fi - 1) if (isSel('stair', st)) { const [a, b] = toS(st.x, st.d), [c, d] = toS(st.x + st.w, st.d + st.len); ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 3; ctx.strokeRect(a, b, c - a, d - b); }
+    if ((st.floor === P.fi || st.floor === P.fi - 1) && isSel('stair', st)) { const [a, b] = toS(B.x0, B.d0), [c, d] = toS(B.x1, B.d1); ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 3; ctx.strokeRect(a, b, c - a, d - b); }
   }
   // furniture
   for (const fu of f.furniture) {
@@ -176,7 +179,7 @@ function pick(x, d) {
     const lx = (x - fu.x) * Math.cos(a) - (-(d - fu.d)) * Math.sin(a), lz = (x - fu.x) * Math.sin(a) + (-(d - fu.d)) * Math.cos(a);
     if (Math.abs(lx - fp.cx) < fp.w / 2 + .05 && Math.abs(lz - fp.cz) < fp.d / 2 + .05) return { k: 'furn', o: fu };
   }
-  for (const st of S.data.stairs) if ((st.floor === P.fi || st.floor === P.fi - 1) && x > st.x && x < st.x + st.w && d > st.d && d < st.d + st.len) return { k: 'stair', o: st };
+  for (const st of S.data.stairs) { const B = stairBounds(st); if ((st.floor === P.fi || st.floor === P.fi - 1) && x > B.x0 && x < B.x1 && d > B.d0 && d < B.d1) return { k: 'stair', o: st }; }
   let rb = null;
   for (const r of f.rooms) if (x > r.x0 && x < r.x1 && d > r.d0 && d < r.d1) { const a = (r.x1 - r.x0) * (r.d1 - r.d0); if (!rb || a < rb.a) rb = { k: 'room', o: r, a }; }
   return rb;
@@ -198,6 +201,11 @@ cvs.addEventListener('pointerdown', e => {
   const t = P.tool;
   if (t === 'wall' || t === 'rail') { P.drag = { mode: 'newwall', start: snapPoint(x, d), end: null, rail: t === 'rail' }; return; }
   if (t === 'room') { P.drag = { mode: 'newroom', start: [snapV(x), snapV(d)], end: null }; return; }
+  if (t === 'stair') {
+    if (P.fi >= S.data.floors.length - 1) { toast('最上層沒有更上面的樓層，請先按「＋」新增樓層'); return; }
+    const st = { id: nid('st'), floor: P.fi, x: snapV(x - .9), d: snapV(d - 1.75), w: 1.8, len: 3.5, rot: 0, flip: false };
+    S.data.stairs.push(st); P.sel = { k: 'stair', o: st }; P.tool = 'select'; buildToolbar(); commit(); toast('已加入樓梯，可在右側旋轉、調整尺寸'); return;
+  }
   if (t === 'door' || t === 'window' || t === 'opening') {
     const nw = nearestWall(x, d); if (!nw) { toast('請點在牆壁上'); return; }
     const L = nw.si.L, def = { door: { type: 'door', w: .8, h: 2.1, sill: 0, style: 'wood', swing: 'b', hinge: 's' }, window: { type: 'window', w: 1.2, h: 1.2, sill: .9 }, opening: { type: 'opening', w: .9, h: 2.1, sill: 0 } }[t];
@@ -341,13 +349,21 @@ export function renderProps() {
     h = `<div class="ph">${CAT[fu.type]?.n || fu.type}</div>${num('X', 'x', fu.x)}${num('深度', 'd', fu.d)}${num('離地高度', 'y', fu.y || 0, .05, 0, 3)}${num('旋轉 (度)', 'rot', fu.rot || 0, 15, -360, 360)}
       <div class="rowb"><button id="pRot">↻ 轉 90°</button><button id="pDup">⧉ 複製</button><button id="pDel" class="danger">🗑 刪除</button></div>`;
   } else if (s.k === 'stair') {
-    h = `<div class="ph">樓梯（${S.data.floors[s.o.floor]?.name} → ${S.data.floors[s.o.floor + 1]?.name || '?'}）</div>${num('X', 'x', s.o.x)}${num('深度', 'd', s.o.d)}<div class="tip">拖曳可移動樓梯，上一層的樓梯口會一起移動。</div><div class="rowb"><button id="pDel" class="danger">🗑 刪除樓梯</button></div>`;
+    const st = s.o, fls = S.data.floors;
+    h = `<div class="ph">樓梯（${fls[st.floor]?.name} → ${fls[st.floor + 1]?.name || '?'}）</div>
+      <label class="pf"><span>連接樓層</span><select data-k="floor">${fls.slice(0, -1).map((f, i) => `<option value="${i}" ${i === st.floor ? 'selected' : ''}>${f.name} → ${fls[i + 1].name}</option>`).join('')}</select></label>
+      ${num('X', 'x', st.x)}${num('深度', 'd', st.d)}${num('寬 (m)', 'w', st.w, .05, 1.0, 3)}${num('長 (m)', 'len', st.len, .05, 2.6, 6)}
+      <label class="pf"><span>踏板</span><select data-k="mat">${[['', '預設'], ['concrete', '水泥'], ['lightwood', '淺木'], ['wood', '木頭'], ['wmarble', '白大理石'], ['stone', '灰石']].map(([v, n]) => `<option value="${v}" ${v === (st.mat || '') ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <div class="tip">方向：${['朝前 ↑', '朝右 →', '朝後 ↓', '朝左 ←'][((st.rot || 0) % 360) / 90]}${st.flip ? '（鏡像）' : ''}　黃色箭頭是往上走的路線，綠點是上一層的出口。</div>
+      <div class="rowb"><button id="pStL">↺ 轉 90°</button><button id="pStR">↻ 轉 90°</button><button id="pStF">⇋ 左右鏡像</button><button id="pDel" class="danger">🗑 刪除樓梯</button></div>`;
   }
   el.innerHTML = h + `<div class="rowb"><button id="pDone">完成</button></div>`;
   el.querySelectorAll('input[data-k],select[data-k]').forEach(inp => inp.onchange = () => {
     const k = inp.dataset.k, v = inp.type === 'number' ? +inp.value : inp.value, o = s.o;
     if (s.k === 'room') { if (k === 'w') o.x1 = o.x0 + Math.max(.3, v); else if (k === 'dd') o.d1 = o.d0 + Math.max(.3, v); else if (k === 'x0') { const w = o.x1 - o.x0; o.x0 = v; o.x1 = v + w; } else if (k === 'd0') { const d = o.d1 - o.d0; o.d0 = v; o.d1 = v + d; } else o[k] = v; }
     else if (s.k === 'wall' && k === 'len') { const L = Math.hypot(o.x2 - o.x1, o.d2 - o.d1); const j = joinedEnds(o).filter(x => x[2] === 2); o.x2 = o.x1 + (o.x2 - o.x1) / L * v; o.d2 = o.d1 + (o.d2 - o.d1) / L * v; for (const [w2, e2] of j) { w2['x' + e2] = o.x2; w2['d' + e2] = o.d2; } }
+    else if (s.k === 'stair' && k === 'floor') { o.floor = +v; }
+    else if (s.k === 'stair' && (k === 'w' || k === 'len')) { o[k] = clamp(v, k === 'w' ? 1.0 : 2.6, k === 'w' ? 3 : 6); }
     else if (s.k === 'op' && k === 'type') { o.type = v; if (v === 'window') { o.sill = o.sill || .9; o.h = Math.min(o.h, 1.4); } else { o.sill = 0; o.h = Math.max(o.h, 2.05); o.style = o.style || 'wood'; o.swing = o.swing || 'b'; o.hinge = o.hinge || 's'; } if (v === 'door2' || v === 'sliding') o.w = Math.max(o.w, 1.2); }
     else o[k] = v;
     commit();
@@ -361,6 +377,8 @@ export function renderProps() {
   on('pSwing', () => { s.o.swing = s.o.swing === 'a' ? 'b' : 'a'; commit(); });
   on('pHinge', () => { s.o.hinge = s.o.hinge === 'e' ? 's' : 'e'; commit(); });
   on('pRot', () => { s.o.rot = ((s.o.rot || 0) + 90) % 360; commit(); });
+  const rotSt = dir => { const st = s.o, B = stairBounds(st), cx = (B.x0 + B.x1) / 2, cd = (B.d0 + B.d1) / 2; st.rot = (((st.rot || 0) + dir) % 360 + 360) % 360; const N = stairBounds({ ...st, x: 0, d: 0 }); st.x = snapV(cx - N.x1 / 2); st.d = snapV(cd - N.d1 / 2); commit(); };
+  on('pStL', () => rotSt(-90)); on('pStR', () => rotSt(90)); on('pStF', () => { s.o.flip = !s.o.flip; commit(); });
   on('pDup', () => { const c = { ...s.o, x: s.o.x + .3, d: s.o.d + .3 }; fl().furniture.push(c); P.sel = { k: 'furn', o: c }; commit(); });
 }
 hintTool();

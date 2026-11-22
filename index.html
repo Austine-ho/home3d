@@ -61,6 +61,11 @@ body:not([data-mode=visit]) #btnNight{display:none}
 #tbtns [data-act=jump]{width:58px;height:58px;right:100px;bottom:0}
 #tbtns [data-act=use]{width:58px;height:58px;right:0;bottom:100px}
 #tbtns [data-act=switch]{width:52px;height:52px;right:96px;bottom:84px;font-size:18px}
+#tbtns [data-act=heal]{width:52px;height:52px;right:0;bottom:170px;font-size:20px}
+body[data-mode=visit] #tbtns [data-act=heal]{display:none}
+#potions{position:absolute;left:240px;bottom:calc(12px + var(--sab));pointer-events:auto;background:rgba(0,0,0,.55);font-size:14px;padding:3px 10px}
+body[data-kind=destroy] #potions,body[data-kind=destroy] #tbtns [data-act=heal]{display:none}
+body.touch #potions{display:none}
 #tbtns [data-act=run]{width:52px;height:52px;right:150px;bottom:40px;font-size:18px}
 body.touch[data-mode=visit] #tbtns,body.touch[data-mode=game] #tbtns{display:block}
 body[data-mode=visit] #tbtns [data-act=attack],body[data-mode=visit] #tbtns [data-act=switch]{display:none}
@@ -170,6 +175,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
       <kbd>Shift</kbd><span>跑步</span><kbd>空白鍵</kbd><span>跳</span>
       <kbd>E</kbd><span>開門 / 開關燈</span><kbd>L</kbd><span>日夜切換</span>
       <kbd>左鍵</kbd><span>攻擊（遊戲）</span><kbd>Q / 1-9</kbd><span>換武器</span>
+      <kbd>H</kbd><span>喝補血藥水</span><kbd>B</kbd><span>商店（拆家）</span>
       <kbd>Tab</kbd><span>參觀 ⇄ 改裝潢</span><kbd>Esc</kbd><span>暫停 / 選單</span>
     </div>
   </div>
@@ -183,7 +189,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 <div id="toast"></div>
 <div id="joy"><div id="joyKnob"></div></div>
 <div id="tbtns">
-  <button data-act="attack">🧹</button><button data-act="jump">⤒</button><button data-act="use">✋</button><button data-act="switch">🔄</button><button data-act="run">🏃</button>
+  <button data-act="attack">🧹</button><button data-act="jump">⤒</button><button data-act="use">✋</button><button data-act="switch">🔄</button><button data-act="run">🏃</button><button data-act="heal">🧪</button>
 </div>
 
 <div id="panel">
@@ -210,7 +216,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
   <div id="gtop"><div id="glevel"></div><div id="gleft"></div><div id="gmoney"></div><div id="gextra"></div></div>
   <div id="bossbar"><div id="bossname"></div><div class="b"><div id="bossfill"></div></div></div>
   <div id="garrow"><i></i><span></span></div>
-  <div id="hpbar"><div id="hpfill"></div><div id="hptext"></div></div>
+  <div id="hpbar"><div id="hpfill"></div><div id="hptext"></div></div><button id="potions">🧪 ×0</button>
   <div id="wbar"></div>
 </div>
 <div id="vig"></div>

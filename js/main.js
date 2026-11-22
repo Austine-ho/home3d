@@ -1,17 +1,17 @@
 // main: modes, menus, 3D edit, save/load, render loop
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, PRESETS, presetColor, tex, DEG, clamp } from './core.js';
 import { CAT } from './catalog.js';
-import { defaultHouse } from './data.js';
-import { H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH } from './house.js';
+import { defaultHouse, migrate } from './data.js';
+import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH } from './house.js';
 import { player, input, on, fx, updatePlayer, requestLock, releaseLock, locked } from './controls.js';
 import { openPlan, closePlan, Plan } from './plan.js';
-import { startGame, stopGame, updateGame, Game, Snd, openShop } from './games.js';
+import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion } from './games.js';
 
 // ---------- save / load ----------
 const KEY = 'home3d_design_v2';
 S.save = () => { try { localStorage.setItem(KEY, JSON.stringify(S.data)); } catch (e) { } };
-function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) return d; } catch (e) { } return defaultHouse(); }
-S.data = load();
+function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.version === 2 && d.floors?.length) { const before = d.defaultRev || 0, m = migrate(d); if (before !== m.defaultRev) setTimeout(() => toast('已套用你的新 1F 設計'), 1500); return m; } } catch (e) { } return defaultHouse(); }
+S.data = load(); S.save();
 let dirty = false;
 function rebuild() { build(S.data); dirty = false; }
 rebuild();
@@ -54,6 +54,7 @@ on.key = e => {
   if (e.code === 'KeyL' && S.mode === 'visit') setNight(!S.night);
   if (e.code === 'KeyE' && (S.mode === 'visit' || S.mode === 'game')) interact();
   if (e.code === 'KeyQ' && S.mode === 'game') on.switchW && on.switchW();
+  if (e.code === 'KeyH' && S.mode === 'game') usePotion();
   if (e.code === 'KeyB' && S.mode === 'game' && Game.kind === 'destroy') openShop(false);
   if (/^Digit[1-9]$/.test(e.code) && S.mode === 'game') { const ids = Object.keys(Game.prof.owned), id = ids[+e.code.slice(5) - 1]; if (id) document.querySelector(`#wbar [data-w="${id}"]`)?.click(); }
   if (S.mode === 'edit') editKey(e);
@@ -68,7 +69,7 @@ function aim() {
   if (!hit) return null; const u = hit.object.userData; return u.door ? { door: u.door } : u.lamp ? { lamp: u.lamp } : null;
 }
 function interact() { const a = aim(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
-on.interact = interact;
+on.interact = interact; on.heal = usePotion; $('#potions').onclick = () => usePotion();
 $('#btnNight').onclick = () => setNight(!S.night);
 function renderFloorBtns() {
   $('#floorbtns').innerHTML = S.data.floors.map((f, i) => `<button data-fl="${i}">${f.name}</button>`).join('');
@@ -77,7 +78,7 @@ function renderFloorBtns() {
 function teleport(fi) {
   const st = S.data.stairs.find(s => s.floor === fi - 1) || S.data.stairs.find(s => s.floor === fi);
   if (fi === 0) { player.pos.set(2.9, 0, 2.4); player.yaw = 0; }
-  else if (st) { player.pos.set(st.x + st.w * .3, floorY(fi) + .05, -(st.d + st.len - .3)); player.yaw = Math.PI / 2; }
+  else if (st) { const g = stairGeom(st), [ax, ad] = st.floor === fi - 1 ? g.arrive : g.start; player.pos.set(ax, floorY(fi) + .05, -ad); }
   else { const r = S.data.floors[fi].rooms[0]; player.pos.set((r.x0 + r.x1) / 2, floorY(fi), -(r.d0 + r.d1) / 2); }
   player.vy = 0; toast('📍 ' + S.data.floors[fi].name);
 }
@@ -168,7 +169,7 @@ cvs.addEventListener('contextmenu', e => e.preventDefault());
 // file ops
 $('#btnExport').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S.data)], { type: 'application/json' })); a.download = '我家設計.json'; a.click(); };
 $('#btnImport').onclick = () => $('#fileIn').click();
-$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; S.data = d; S.save(); rebuild(); renderFloorBtns(); toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
+$('#fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (d.version !== 2) throw 0; d.defaultRev = Math.max(d.defaultRev || 0, 2); S.data = d; S.save(); rebuild(); renderFloorBtns(); toast('已匯入設計'); } catch (err) { toast('檔案格式不正確'); } e.target.value = ''; };
 $('#btnReset').onclick = () => { if (confirm('還原成依影片建立的原始格局？目前的設計會被覆蓋（建議先匯出備份）。')) { S.data = defaultHouse(); S.save(); rebuild(); renderFloorBtns(); Plan.hist = []; toast('已還原'); } };
 $('#btnShot').onclick = () => { renderer.render(scene, camera); const a = document.createElement('a'); a.href = cvs.toDataURL('image/png'); a.download = '我家截圖.png'; a.click(); };
 $('#btnFull').onclick = () => { const d = document.documentElement; if (!document.fullscreenElement) (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); else document.exitFullscreen?.(); };

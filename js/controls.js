@@ -4,7 +4,7 @@ import { hits, groundAt } from './house.js';
 
 export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 2.4, run: 4.4, eye: 1.58, bob: 0 };
 export const input = { keys: {}, jx: 0, jy: 0, look: true, attack: false };
-export const on = { interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
+export const on = { heal: null, interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
 export const fx = { shake: 0, kick: 0 };
 
 const cvs = renderer.domElement;
@@ -85,6 +85,7 @@ document.querySelectorAll('#tbtns [data-act]').forEach(b => {
     if (act === 'run') input.keys.ShiftLeft = !input.keys.ShiftLeft;
     if (act === 'use') on.interact && on.interact();
     if (act === 'switch') on.switchW && on.switchW();
+    if (act === 'heal') on.heal && on.heal();
   }, { passive: false });
   b.addEventListener('touchend', e => {
     e.preventDefault(); b.classList.remove('on');
