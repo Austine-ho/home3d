@@ -1,6 +1,6 @@
 // player movement + keyboard / mouse / touch input
 import { THREE, S, camera, renderer, isTouch, $, clamp, toast } from './core.js';
-import { hits, groundAt } from './house.js';
+import { hits, groundAt, pushOut } from './house.js';
 
 export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 2.4, run: 4.4, eye: 1.58, bob: 0 };
 export const input = { keys: {}, jx: 0, jy: 0, look: true, attack: false };
@@ -46,7 +46,8 @@ document.addEventListener('mousemove', e => {
   if (locked()) look(e.movementX * 2.2, e.movementY * 2.2);
   else if (drag) { look((e.clientX - drag.x) * 4, (e.clientY - drag.y) * 4); drag = { x: e.clientX, y: e.clientY }; }
 });
-export function look(dx, dy) { player.yaw -= dx * 0.001; player.pitch = clamp(player.pitch - dy * 0.001, -1.45, 1.45); }
+const SENS = 0.00125; // +25% (was 0.001)
+export function look(dx, dy) { player.yaw -= dx * SENS; player.pitch = clamp(player.pitch - dy * SENS, -1.45, 1.45); }
 
 // touch: left half = joystick, right half = look
 const joy = $('#joy'), knob = $('#joyKnob');
@@ -110,9 +111,17 @@ export function updatePlayer(dt, t, canMove) {
     const spd = (run ? player.run : player.speed) * dt / n;
     const sy = Math.sin(player.yaw), cyw = Math.cos(player.yaw);
     const dx = (-sy * fz + cyw * fx_) * spd, dz = (-cyw * fz - sy * fx_) * spd;
-    const p = player.pos, stuck = hits(p.x, p.z, p.y);
-    if (stuck || !hits(p.x + dx, p.z, p.y)) p.x += dx;
-    if (stuck || !hits(p.x, p.z + dz, p.y)) p.z += dz;
+    const p = player.pos;
+    if (hits(p.x, p.z, p.y)) { p.x += dx; p.z += dz; }        // already inside something: let the player walk out
+    else {
+      // small steps, each pushed out of whatever it touches, so the player glides along walls and furniture
+      const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / .08));
+      for (let i = 0; i < n; i++) {
+        const [nx, nz] = pushOut(p.x + dx / n, p.z + dz / n, p.y);
+        if (!hits(nx, nz, p.y, .235)) { p.x = nx; p.z = nz; }
+        else { if (!hits(p.x + dx / n, p.z, p.y)) p.x += dx / n; if (!hits(p.x, p.z + dz / n, p.y)) p.z += dz / n; }
+      }
+    }
     player.bob += dt * (run ? 14 : 10);
   }
   if (canMove && k.Space && player.ground) { player.vy = 4.2; player.ground = false; }

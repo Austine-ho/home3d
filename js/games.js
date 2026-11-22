@@ -1,6 +1,6 @@
 // three games: 清潔大作戰 (pests), 驅鬼大師 (ghosts), 拆家狂人 (destruction)
 import { THREE, S, $, scene, camera, M, bx, cy, sp, toast, clamp, DEG, isTouch, shade } from './core.js';
-import { H, hits, groundAt, floorOf, FH, damageAt, lightCfg, setNight, hemi, amb, setLamp, floorY, build, destructionProgress, killBlock, entFi, allFl } from './house.js';
+import { H, hits, groundAt, floorOf, FH, damageAt, lightCfg, setNight, hemi, amb, setLamp, floorY, build, destructionProgress, killBlock, entFi, allFl, zoneOf } from './house.js';
 import { player, input, fx, on } from './controls.js';
 
 // ================= audio (synthesised) =================
@@ -37,6 +37,16 @@ export const Snd = {
   ghostAppear() { this.tone(180, 1.4, 'sine', .25, 90); this.tone(185, 1.4, 'sine', .2, 95); },
   heart() { this.tone(60, .12, 'sine', .5, 40); this.tone(55, .12, 'sine', .4, 35, .2); },
   bell() { [880, 1320, 1760].forEach((f, i) => this.tone(f, 1.2, 'sine', .15, null, i * .02)); },
+  // horror stingers
+  jumpscare() { const c = this.ctx; if (!c) return; this.noise(1.2, .9, 4000, 'bandpass', 600); for (let i = 0; i < 5; i++) this.tone(300 + i * 113, 1.2, 'sawtooth', .22, 900 + i * 210); this.tone(55, 1.0, 'square', .5, 30); },
+  stinger() { [0, 1, 2].forEach(i => this.tone(1200 + i * 66, 1.6, 'sawtooth', .07, 600 + i * 40, i * .02)); this.tone(70, 1.5, 'sine', .4, 40); },
+  whisper() { for (let i = 0; i < 6; i++) setTimeout(() => this.noise(.25 + Math.random() * .3, .07, 2500 + Math.random() * 2500, 'bandpass', 1500), i * 230); },
+  giggle(pan = 0, vol = .2) {
+    const c = this.ctx; if (!c) return; const pn = c.createStereoPanner ? c.createStereoPanner() : null; const out = pn || this.master; if (pn) { pn.pan.value = Math.max(-1, Math.min(1, pan)); pn.connect(this.master); }
+    const n = 4 + Math.floor(Math.random() * 3), b = 900 + Math.random() * 300;
+    for (let i = 0; i < n; i++) { const t = c.currentTime + i * .11, o = c.createOscillator(), g = c.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(b * (1 + (i % 2) * .25), t); o.frequency.exponentialRampToValueAtTime(b * .7, t + .09); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + .1); o.connect(g); g.connect(out); o.start(t); o.stop(t + .12); }
+  },
+  gun() { this.noise(.09, .5, 3000, 'lowpass', 300); this.tone(220, .08, 'square', .15, 80); },
   droneOn() { const c = this.ctx; if (!c || this.drone) return; const o = c.createOscillator(), o2 = c.createOscillator(), g = c.createGain(); o.type = 'sawtooth'; o.frequency.value = 55; o2.type = 'sine'; o2.frequency.value = 58; const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 180; g.gain.value = .12; o.connect(f); o2.connect(f); f.connect(g); g.connect(this.master); o.start(); o2.start(); this.drone = [o, o2, g]; },
   droneOff() { if (this.drone) { this.drone[0].stop(); this.drone[1].stop(); this.drone = null; } },
 };
@@ -90,6 +100,7 @@ export const WEAPONS = {
   grenade: { g: 'destroy', n: '手榴彈', icon: '💣', kind: 'proj', dmg: 160, speed: 11, grav: 9.8, fuse: 1.6, radius: 2.4, rate: .8, price: 600, model: 'grenade', bounce: 1 },
   cannon: { g: 'destroy', n: '大砲', icon: '💥', kind: 'proj', dmg: 220, speed: 24, grav: 3, radius: 2.0, rate: .9, price: 1000, model: 'ball' },
   rocket: { g: 'destroy', n: '火箭筒', icon: '🚀', kind: 'proj', dmg: 280, speed: 26, grav: 0, radius: 2.8, rate: 1.0, price: 1800, model: 'rocket' },
+  pistol: { g: 'hide', n: '玩具手槍', icon: '🔫', kind: 'hitscan', dmg: 1, rate: .3, price: 0 },
   mega: { g: 'destroy', n: '超級炸彈', icon: '☢️', kind: 'proj', dmg: 3000, speed: 10, grav: 9.8, fuse: 3, radius: 9, rate: 4, price: 6000, model: 'mega', bounce: 1 },
 };
 const lvMult = lv => 1 + .45 * lv;
@@ -118,6 +129,7 @@ function buildVM(id) {
     case 'grenade': case 'mega': sp(g, id === 'mega' ? .12 : .07, 0, 0, 0, M(id === 'mega' ? '#e8d020' : '#4a5a2a', { r: .5 })); if (id === 'mega') bx(g, .02, .02, .02, 0, .12, 0, M('#f00', { e: '#f00' })); break;
     case 'cannon': cy(g, .09, .11, .55, 0, -.1, -.1, dark, 12).rotation.x = Math.PI / 2; break;
     case 'rocket': cy(g, .07, .07, .7, 0, 0, -.1, M('#4a5a3a'), 12).rotation.x = Math.PI / 2; bx(g, .04, .1, .06, 0, -.12, .05, dark); break;
+    case 'pistol': bx(g, .05, .09, .26, 0, 0, -.04, M('#e85a9a', { r: .4 })); bx(g, .045, .14, .06, 0, -.1, .06, M('#333')); cy(g, .018, .018, .08, 0, .01, -.2, M('#ffd23a'), 8).rotation.x = Math.PI / 2; break;
   }
   const bx0 = { broom: -.7, mugwort: -.6, hammer: -.3, chainsaw: 0, stick: -.5 }[id] ?? .1;
   g.rotation.set(bx0, -.15, 0); g.userData.bx = bx0;
@@ -228,7 +240,7 @@ function ghostKing() {
 const G = { kind: null, active: false, paused: false, level: 1, enemies: [], projs: [], cool: 0, hp: 100, maxHp: 100, queue: 0, spawnT: 0, prof: null, t: 0, boss: null, collapse: 0, scareT: 0 };
 export const Game = G;
 const PROF_KEY = k => 'home_game_' + k;
-const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer', adventure: 'stick' };
+const DEF_W = { clean: 'broom', ghost: 'mugwort', destroy: 'hammer', adventure: 'stick', hide: 'pistol' };
 function loadProf(kind) {
   let p; try { p = JSON.parse(localStorage.getItem(PROF_KEY(kind))); } catch (e) { }
   if (!p) p = { money: kind === 'destroy' ? 200 : 0, owned: { [DEF_W[kind]]: 0 }, cur: DEF_W[kind], level: 1, hpLv: 0, spdLv: 0, defLv: 0, regLv: 0, potions: 2, best: 0 };
@@ -238,6 +250,7 @@ const maxHpOf = p => 100 + (p.hpLv || 0) * 40;
 const hpCost = p => 120 + 110 * (p.hpLv || 0);
 const potCost = () => 60;
 export function usePotion() {
+  if (G.kind === 'hide' && G.active) return hideHint();
   if (!G.active || G.kind === 'destroy' || G.paused) return;
   if (!G.prof.potions) return toast('沒有藥水了，到商店買');
   if (G.hp >= G.maxHp) return toast('生命已經是滿的');
@@ -270,7 +283,7 @@ const W = () => WEAPONS[G.prof.cur];
 const curDmg = () => W().dmg * lvMult(G.prof.owned[G.prof.cur] || 0) * (G.buffs?.power > 0 ? 2 : 1);
 
 let flashlight = null, worldTargets = [];
-export function startGame(kind, data) {
+export function startGame(kind, data, opts = {}) {
   Snd.init();
   stopGame(true);
   G.kind = kind; G.active = true; G.paused = false; G.prof = loadProf(kind); G.t = 0; G.collapse = 0;
@@ -278,7 +291,7 @@ export function startGame(kind, data) {
   worldTargets = kind === 'destroy' ? null : [...H.wallMeshes, ...H.slabMeshes];
   const pf = G.prof; pf.defLv ??= 0; pf.regLv ??= 0; pf.potions ??= 2;
   G.maxHp = maxHpOf(pf); G.hp = G.maxHp; clearHearts(); player.speed = 2.4 * (1 + G.prof.spdLv * .08); player.run = 4.4 * (1 + G.prof.spdLv * .08);
-  G.buffs = { speed: 0, power: 0, shield: 0 }; G.session = (G.session || 0) + 1;
+  G.buffs = { speed: 0, power: 0, shield: 0 }; G.session = (G.session || 0) + 1; G.evT = 25; G.auto = !!opts.auto;
   vm.visible = true; buildVM(G.prof.cur);
   $('#ghud').classList.add('show'); $('#ghud').dataset.kind = kind; document.body.dataset.kind = kind;
   if (kind === 'ghost') {
@@ -290,13 +303,14 @@ export function startGame(kind, data) {
   renderWeaponBar();
   if (kind === 'destroy') { banner('🔨 拆家狂人', '盡情破壞！賺錢買更強的武器，把整個家拆光', 2600); updateHUD(); }
   else if (kind === 'adventure') { startAdventure(); }
+  else if (kind === 'hide') startHide(G.prof.level || 1);
   else startLevel(G.prof.level);
 }
 export function stopGame(silent) {
   if (!G.active) return;
   G.active = false; clearHearts(); for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; for (const p of G.projs) scene.remove(p.mesh); G.projs = [];
   vm.visible = false; beam.visible = false; $('#ghud').classList.remove('show'); $('#shop').classList.remove('show'); $('#banner').classList.remove('show'); $('#vig').classList.remove('show');
-  clearAdventure(); lightCfg.lockFog = false; $('#gextra').innerHTML = '';
+  clearAdventure(); clearHide(); lightCfg.lockFog = false; $('#gextra').innerHTML = ''; $('#dialog').classList.remove('show');
   if (flashlight) flashlight.intensity = 0; scene.fog = null; lightCfg.flicker = 0; lightCfg.intensity = 8; Snd.droneOff(); setNight(false);
   H.lamps.forEach(l => setLamp(l, true));
   if (G.kind) saveProf();
@@ -318,20 +332,27 @@ function randomSpot(fi, avoidPlayer = 3) {
 function spawnEnemy(type, pos, L = G.level) {
   const d = ENEMY[type], mesh = d.build(); mesh.position.copy(pos); scene.add(mesh);
   const sc = 1 + .18 * (L - 1);
-  const e = { type, d, mesh, hp: d.hp * sc, max: d.hp * sc, spd: d.spd * Math.min(1.6, 1 + .035 * (L - 1)), dmg: d.dmg * (1 + .1 * (L - 1)), r: d.r, cool: 0, dir: Math.random() * 6.28, wt: 0, t: Math.random() * 10, abil: 3 + Math.random() * 3, vis: d.ghost ? 0 : 1, y: pos.y, base: pos.y };
+  const e = { type, d, mesh, hp: d.hp * sc, max: d.hp * sc, spd: d.spd * Math.min(1.6, 1 + .035 * (L - 1)), dmg: d.dmg * (1 + .1 * (L - 1)), r: d.r, cool: 0, dir: Math.random() * 6.28, wt: 0, t: Math.random() * 10, abil: 3 + Math.random() * 3, vis: d.ghost ? 0 : 1, y: pos.y, base: pos.y, sc: 1, home: pos.clone() };
   G.enemies.push(e); if (d.boss) { G.boss = e; $('#bossbar').classList.add('show'); $('#bossname').textContent = d.n; }
   return e;
 }
+// abnormally big monster: slower, much tougher, hits harder
+function makeGiant(e, s = 1.8 + Math.random() * .8) {
+  e.sc = s; e.hp = e.max = e.max * s * s * .8; e.dmg *= 1.6; e.spd *= .85; e.r *= Math.min(s, 1.6); e.giant = 1; e.mesh.scale.setScalar(s); return e;
+}
+// how tense this level is: giants, swarms and events get likelier as the levels go up
+const giantChance = L => L < 2 ? 0 : Math.min(.28, .03 * (L - 1));
 function startLevel(L) {
   G.level = L; for (const e of G.enemies) scene.remove(e.mesh); G.enemies = []; G.boss = null; $('#bossbar').classList.remove('show');
-  G.hp = G.maxHp;
+  G.hp = G.maxHp; G.evT = Math.max(12, 32 - L * 2.5);
   const nF = S.data.floors.length;
   if (G.kind === 'clean') {
     const boss = L % 5 === 0, n = boss ? 4 + L : 6 + L * 3;
     for (let i = 0; i < n; i++) {
       const r = Math.random(); const type = L >= 3 && r < .2 ? 'rat' : L >= 2 && r < .5 ? 'mosquito' : 'roach';
-      spawnEnemy(type, randomSpot(Math.floor(Math.random() * nF)));
+      const e = spawnEnemy(type, randomSpot(Math.floor(Math.random() * nF))); if (Math.random() < giantChance(L)) makeGiant(e);
     }
+    if (L >= 4 && Math.random() < .35) { const k = 6 + L * 2; for (let i = 0; i < k; i++) spawnEnemy('roach', randomSpot(floorOf(player.pos.y), 4)); setTimeout(() => G.active && banner('⚠️ 異常', `蟑螂大量出沒！多了 ${k} 隻`, 2200), 2400); }
     if (boss) spawnEnemy('roachKing', randomSpot(0, 5));
     banner(boss ? `👑 第 ${L} 關 BOSS` : `🧹 第 ${L} 關`, boss ? '蟑螂王出現了！' : `清除 ${n} 隻害蟲`, 2200);
   } else {
@@ -371,6 +392,7 @@ function equip(id) { G.prof.cur = id; buildVM(id); renderWeaponBar(); saveProf()
 function camFwd() { camera.getWorldDirection(fwd); return fwd; }
 function tryFire() {
   if (G.cool > 0) return; const w = W(); G.cool = w.rate;
+  if (w.kind === 'hitscan') return hideShoot();
   const dmg = curDmg(), dir = camFwd().clone(), origin = camera.getWorldPosition(new THREE.Vector3());
   if (w.kind === 'melee') {
     swingT = 1; Snd.whoosh(); fx.kick = .04;
@@ -419,7 +441,7 @@ function tryFire() {
 function destroyTargets() { return [...H.blockMeshes, ...H.furn.map(e => e.obj), ...H.doors.filter(d => !d.dead && d.leaf).map(d => d.leaf), ...H.breakables.filter(b => b.kind === 'window').map(b => b.obj), ...H.slabMeshes]; }
 function earn(m) { if (!m) return; G.prof.money += m; if (Math.random() < .3) Snd.coin(); updateHUD(); }
 function hurtEnemy(e, dmg, dir, quiet) {
-  if (e.dead) return; e.hp -= dmg; e.flash = .12; e.aggro = true;
+  if (e.dead || !e.mesh.visible) return; e.hp -= dmg; e.flash = .12; e.aggro = true;
   if (dir && !e.d.boss) e.mesh.position.addScaledVector(dir.clone().setY(0).normalize(), quiet ? .01 : .25);
   if (!quiet) burst(e.mesh.position.clone().add(new THREE.Vector3(0, .3, 0)), e.d.ghost ? '#cfe8ff' : '#7a5a2a', 4, 3, .06, .5);
   if (e.hp <= 0) killEnemy(e);
@@ -429,7 +451,9 @@ function killEnemy(e) {
   const pos = e.mesh.position.clone().add(new THREE.Vector3(0, .3, 0));
   if (e.d.ghost) { burst(pos, '#e8f6ff', 18, 4, .1, 1.2, -1.5, { glow: 1 }); Snd.tone(600, .5, 'sine', .2, 1500); }
   else { burst(pos, '#6b8a2a', 10, 3, .08, .8); Snd.squish(); }
-  const m = Math.round(e.d.money * (1 + .1 * (G.level - 1))); earn(m); floatText(`+$${m}`, pos);
+  const m = Math.round(e.d.money * (1 + .1 * (G.level - 1)) * (e.giant ? 4 : 1)); earn(m); floatText(`+$${m}`, pos);
+  if (e.giant) { dropHeart(pos); fx.shake = Math.max(fx.shake, .8); }
+  if (e.temp) return;
   if (e.d.boss) for (let i = 0; i < 3; i++) dropHeart(pos.clone().add(new THREE.Vector3((Math.random() - .5) * 2, 0, (Math.random() - .5) * 2)));
   else if (Math.random() < .14) dropHeart(pos);
   if (e.adv) { const ses = G.session, m0 = e.adv; if (e === G.boss) { G.boss = null; $('#bossbar').classList.remove('show'); } if (m0.respawn > 0) setTimeout(() => { if (G.active && G.session === ses) spawnAdv(m0); }, m0.respawn * 1000); return; }
@@ -482,6 +506,7 @@ function updateEnemies(dt) {
     const m = e.mesh, d = e.d;
     const dx = pp.x - m.position.x, dz = pp.z - m.position.z, distH = Math.hypot(dx, dz), dy = pp.y - e.base;
     const sameFloor = Math.abs(dy) < 1.4;
+    if (e.adv?.mode === 'scare') { updateScarer(e, dt, distH, sameFloor); continue; }
     let mvx = 0, mvz = 0, advChase = true;
     if (e.adv) { const rg = e.adv.range || 10; advChase = sameFloor && (e.adv.mode === 'active' ? distH < rg : e.aggro && distH < rg * 2.5); if (!advChase && e.aggro && distH > rg * 2.5) e.aggro = false; }
     if (!advChase) {
@@ -526,12 +551,34 @@ function updateEnemies(dt) {
       }
       m.rotation.y = Math.atan2(mvx, mvz);
     }
-    if (e.flash > 0) { e.flash -= dt; m.scale.setScalar(1 + e.flash); } else m.scale.setScalar(1);
+    if (e.flash > 0) { e.flash -= dt; m.scale.setScalar(e.sc * (1 + e.flash)); } else m.scale.setScalar(e.sc);
     // attack player
     const reach = e.r + .55, d3 = Math.hypot(distH, (m.position.y - (pp.y + 1)) * (d.fly && !d.ghost ? 1 : .3));
     if (advChase && d3 < reach + (d.boss ? .6 : 0) && e.cool <= 0 && (sameFloor || d.ghost)) { e.cool = d.boss ? 1.2 : 1.3; hurtPlayer(e.dmg); }
     // jump scare when a ghost comes close in view
     if (advChase && d.ghost && !e.scared && distH < 3.2) { e.scared = true; const v = camFwd(), to = new THREE.Vector3(dx, 0, dz).normalize().negate(); if (v.x * to.x + v.z * to.z > .3) scare(0); }
+  }
+}
+// 嚇人: stands still and waits; when you come close it rushes into your face with a scream, then vanishes for a while
+const tmpS = new THREE.Vector3();
+function updateScarer(e, dt, distH, sameFloor) {
+  const m = e.mesh;
+  if (e.hgt == null) { const b = new THREE.Box3().setFromObject(m); e.hgt = Math.max(.3, (b.max.y - b.min.y) / (m.scale.y || 1)); }
+  if (e.jump > 0) {
+    e.jump -= dt; const f = camFwd(), cp = camera.getWorldPosition(tmpS), s = 1.7 / e.hgt, k = 1 - Math.max(0, e.jump - 1.1) / .25;
+    m.scale.setScalar(s * (1 + Math.sin(e.t * 40) * .03)); m.visible = true;
+    m.position.set(cp.x + f.x * (.95 + (1 - k) * 2), cp.y - 1.22 + Math.sin(e.t * 30) * .02, cp.z + f.z * (.95 + (1 - k) * 2));
+    m.rotation.y = Math.atan2(cp.x - m.position.x, cp.z - m.position.z);
+    if (e.jump <= 0) { m.visible = false; e.cd = 14 + Math.random() * 10; m.scale.setScalar(e.sc); }
+    return;
+  }
+  if (e.cd > 0) { e.cd -= dt; m.visible = false; if (e.cd <= 0) { m.position.copy(e.home); m.visible = true; } return; }
+  m.position.y = e.base; m.rotation.y = Math.atan2(player.pos.x - m.position.x, player.pos.z - m.position.z) + Math.sin(e.t * .7) * .3;
+  if (m.userData.legs) m.userData.legs.rotation.y = 0;
+  if (sameFloor && distH < (e.adv.range || 4)) {
+    e.jump = 1.35; Snd.jumpscare(); scare(1); vibrate([400, 60, 400]);
+    const fl = $('#flash'); fl.style.background = 'rgba(0,0,0,.9)'; fl.style.opacity = 1; setTimeout(() => fl.style.opacity = 0, 60);
+    if (e.dmg > 0) setTimeout(() => G.active && hurtPlayer(e.dmg * .8), 250);
   }
 }
 function fireball(e) {
@@ -597,6 +644,12 @@ function updateHUD() {
     const p = destructionProgress(); $('#glevel').textContent = `破壞度 ${Math.floor(p * 100)}%`; $('#gleft').textContent = '';
     $('#hpbar').style.display = 'none'; $('#gextra').innerHTML = '<button id="gRestore">♻️ 復原</button><button id="gShop">🛒 商店</button>';
     $('#gRestore').onclick = () => restoreHouse(); $('#gShop').onclick = () => openShop(false);
+  } else if (G.kind === 'hide') {
+    $('#hpbar').style.display = 'none'; const t = Math.max(0, Math.ceil(HD.time));
+    $('#glevel').textContent = `👤 捉迷藏 第 ${G.level} 關`;
+    $('#gleft').textContent = `找到 ${HD.found}/${HD.figs.length}　⏱ ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    if (!$('#gHint')) { $('#gextra').innerHTML = '<button id="gHint">📡 提示</button>'; $('#gHint').onclick = () => hideHint(); }
+    $('#gHint').textContent = `📡 提示 ×${HD.hints}`;
   } else if (G.kind === 'adventure') {
     $('#hpbar').style.display = 'block'; $('#hpfill').style.width = (G.hp / G.maxHp * 100) + '%'; $('#hptext').textContent = `${Math.ceil(G.hp)} / ${G.maxHp}`; $('#potions').textContent = `🧪 ×${G.prof.potions}`;
     const b = G.buffs, fi = floorOf(player.pos.y), near = G.enemies.filter(e => floorOf(e.base) === fi).length;
@@ -677,10 +730,12 @@ export function updateGame(dt) {
   // view model swing
   const g = vm.userData.g; if (g) { swingT = Math.max(0, swingT - dt * 4); const k = Math.sin(swingT * Math.PI); g.rotation.x = (g.userData.bx ?? .1) - k * 1.4; g.rotation.z = -k * .6; g.position.y = Math.sin(G.t * 8) * .005; }
   updateProjs(dt); updateEnemyShots(); updateEnemies(dt); updateFallers(dt);
-  if (G.kind !== 'destroy' && G.hp < G.maxHp && !G.enemies.some(e => e.mesh.position.distanceTo(player.pos) < 5)) G.hp = Math.min(G.maxHp, G.hp + dt * (2 + G.prof.regLv * 2.5));
+  if (G.kind !== 'destroy' && G.kind !== 'hide' && G.hp < G.maxHp && !G.enemies.some(e => e.mesh.position.distanceTo(player.pos) < 5)) G.hp = Math.min(G.maxHp, G.hp + dt * (2 + G.prof.regLv * 2.5));
   if (G.kind !== 'destroy' && G.prof.regLv && G.hp < G.maxHp) G.hp = Math.min(G.maxHp, G.hp + dt * G.prof.regLv * .6);
   updateHearts(dt);
   if (G.kind === 'adventure') updateAdventure(dt);
+  if (G.kind === 'hide') updateHide(dt);
+  if ((G.kind === 'clean' || G.kind === 'ghost') && G.level >= 2) horrorEvents(dt, G.level);
   // ghost spawner
   if (G.kind === 'ghost') {
     G.spawnT -= dt;
@@ -691,7 +746,7 @@ export function updateGame(dt) {
       const a = Math.random() * 6.28, dist = 3 + Math.random() * 3;
       let pos = new THREE.Vector3(player.pos.x + Math.sin(a) * dist, player.pos.y, player.pos.z + Math.cos(a) * dist);
       if (type === 'jiangshi') pos = randomSpot(floorOf(player.pos.y), 4);
-      spawnEnemy(type, pos); Snd.ghostAppear();
+      const ne = spawnEnemy(type, pos); if (Math.random() < giantChance(G.level)) { makeGiant(ne); Snd.stinger(); } Snd.ghostAppear();
       if (Math.random() < .5) { lightCfg.flicker = .4; G.scareT = .8; }
     }
     ambT -= dt; if (ambT <= 0) { ambT = 4 + Math.random() * 7; const r = Math.random(); if (r < .4) Snd.noise(1.5, .06, 400, 'bandpass', 200); else if (r < .7) Snd.tone(90 + Math.random() * 60, 1.2, 'sine', .08, 60); else { H.lamps.forEach(l => Math.random() < .3 && setLamp(l, !l.on)); } }
@@ -704,7 +759,7 @@ export function updateGame(dt) {
   if (G.boss) $('#bossfill').style.width = (G.boss.hp / G.boss.max * 100) + '%';
   // nearest enemy arrow
   const arrow = $('#garrow');
-  if (G.kind !== 'destroy' && G.kind !== 'adventure' && G.enemies.length) {
+  if (G.kind !== 'destroy' && G.kind !== 'adventure' && G.kind !== 'hide' && G.enemies.length) {
     let best = null, bd = 1e9; for (const e of G.enemies) { const d = e.mesh.position.distanceTo(player.pos) + Math.abs(e.base - player.pos.y) * 3; if (d < bd) { bd = d; best = e; } }
     const dx = best.mesh.position.x - player.pos.x, dz = best.mesh.position.z - player.pos.z, ang = Math.atan2(dx, -dz) + player.yaw;
     const fd = floorOf(best.base) - floorOf(player.pos.y);
@@ -713,13 +768,208 @@ export function updateGame(dt) {
   hudT -= dt; if (hudT <= 0) { hudT = .25; updateHUD(); checkCollapse(); }
 }
 
+// ================= horror events: the further you get, the more often something goes wrong =================
+function behindPlayer(dist = 4) {
+  const f = camFwd(); for (let i = 0; i < 12; i++) { const a = Math.atan2(-f.x, -f.z) + (Math.random() - .5) * 1.6, x = player.pos.x + Math.sin(a) * dist, z = player.pos.z + Math.cos(a) * dist; if (!hits(x, z, player.pos.y, .35, true) && groundAt(x, z, player.pos.y + .3) > player.pos.y - .5) return new THREE.Vector3(x, player.pos.y, z); dist *= .85; }
+  return null;
+}
+function horrorEvents(dt, L, zone) {
+  G.evT -= dt; if (G.evT > 0) return;
+  G.evT = Math.max(9, 34 - L * 2.5) * (.7 + Math.random() * .6);
+  const kinds = ['whisper', 'blackout']; if (L >= 3) kinds.push('giant', 'giant'); if (L >= 4) kinds.push('swarm'); if (L >= 5) kinds.push('face', 'blackout');
+  const ev = kinds[Math.floor(Math.random() * kinds.length)];
+  const pestType = G.kind === 'clean' ? (L >= 3 ? 'rat' : 'roach') : G.kind === 'ghost' ? (L >= 4 ? 'jiangshi' : 'lady') : 'hound';
+  if (ev === 'whisper') { Snd.whisper(); lightCfg.flicker = .35; G.scareT = 1.2; }
+  else if (ev === 'blackout') {
+    const was = H.lamps.map(l => l.on); H.lamps.forEach(l => setLamp(l, false)); const oi = lightCfg.intensity; lightCfg.intensity = oi * .25; Snd.tone(60, 2.5, 'sawtooth', .12, 35); banner('💡 停電了…', '', 1500);
+    const ses = G.session; setTimeout(() => { if (!G.active || G.session !== ses) return; lightCfg.intensity = oi; H.lamps.forEach((l, i) => setLamp(l, was[i])); }, 4000 + Math.random() * 2500);
+    if (L >= 4) { const p = behindPlayer(3); if (p) { const e = spawnEnemy(pestType, p); e.temp = !!zone; } }
+  } else if (ev === 'giant') {
+    const p = behindPlayer(5); if (!p) return; const e = makeGiant(spawnEnemy(pestType, p), 2.2 + Math.random() * .8 + L * .05); e.temp = !!zone; if (e.adv == null && zone) e.home = p.clone();
+    Snd.stinger(); fx.shake = .6; banner('⚠️ 異常巨大的東西出現了', '在你後面…', 2000);
+  } else if (ev === 'swarm') {
+    const n = 5 + L, t = G.kind === 'clean' ? 'roach' : G.kind === 'ghost' ? 'wisp' : 'hound';
+    for (let i = 0; i < n; i++) { const p = behindPlayer(3 + Math.random() * 3); if (p) { const e = spawnEnemy(t, p); e.temp = !!zone; } }
+    Snd.whisper(); banner('⚠️ 異常大量', `${n} 隻同時出現！`, 1800);
+  } else if (ev === 'face') {
+    const e = spawnEnemy(zone ? 'smiler' : G.kind === 'ghost' ? 'lady' : 'smiler', player.pos.clone()); e.temp = true; e.adv = { mode: 'scare', range: 99, dmg: 0 }; e.dmg = 0; updateScarer(e, 0, 0, true);
+    const ses = G.session; setTimeout(() => { if (G.session === ses && !e.dead) { e.dead = true; scene.remove(e.mesh); G.enemies = G.enemies.filter(x => x !== e); } }, 1500);
+  }
+}
+
+// ================= pause: continue / save / restart =================
+export function openPause() {
+  if (!G.active || $('#shop').classList.contains('show') || $('#dialog').classList.contains('show')) return;
+  G.paused = true; holding = false; beam.visible = false;
+  const name = { clean: '🪳 清潔大作戰', ghost: '👻 驅鬼大師', destroy: '🔨 拆家狂人', adventure: '🗝 探險模式', hide: '👤 捉迷藏' }[G.kind];
+  const info = G.kind === 'destroy' ? `💰 $${G.prof.money}` : G.kind === 'adventure' ? `💰 $${G.prof.money}` : `第 ${G.level} 關 · 💰 $${G.prof.money}`;
+  showDialog('⏸ 暫停 · ' + name, info + '<br><small>進度會自動存檔，也可以手動存檔。</small>', [
+    ['▶ 繼續', () => { G.paused = false; }],
+    ['💾 存檔', () => { saveProf(); toast('💾 已存檔'); G.paused = false; }],
+    ['🔁 重新開始', () => showDialog('確定重新開始？', '這個遊戲的金錢、武器和關卡都會清空，從第 1 關開始。', [['🔁 確定重新開始', () => restartGame()], ['取消', () => { G.paused = false; }]])],
+    ['🏠 回主選單', () => on.escape && on.escape('menu')]]);
+}
+export function restartGame(kind = G.kind) {
+  const auto = G.auto; stopGame(true); try { localStorage.removeItem(PROF_KEY(kind)); } catch (e) { }
+  startGame(kind, S.data, { auto }); toast('🔁 重新開始');
+}
+export { showDialog };
+
+// ================= 捉迷藏: camouflaged little white people hidden all over the house =================
+const HD = { figs: [], t: 0, time: 0, hints: 3, intro: 0, moveT: 20, found: 0, over: false };
+const figGeo = { body: new THREE.CapsuleGeometry(.17, .38, 4, 10), head: new THREE.SphereGeometry(.15, 14, 10), limb: new THREE.CapsuleGeometry(.055, .3, 3, 6) };
+const texAvg = {};
+function avgColor(tex) {
+  if (!tex?.image) return null; const k = tex.uuid; if (texAvg[k]) return texAvg[k];
+  try { const c = document.createElement('canvas'); c.width = c.height = 8; const x = c.getContext('2d'); x.drawImage(tex.image, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data; let r = 0, g = 0, b = 0; for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; } return texAvg[k] = new THREE.Color(r / 16320, g / 16320, b / 16320).convertSRGBToLinear(); } catch (e) { return null; }
+}
+function makeFig(h) {
+  const g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: .8 });
+  const body = new THREE.Mesh(figGeo.body, mat); body.position.y = .55; g.add(body);
+  const head = new THREE.Mesh(figGeo.head, mat); head.position.y = 1.0; g.add(head);
+  for (const sx of [-1, 1]) { const a = new THREE.Mesh(figGeo.limb, mat); a.position.set(sx * .24, .62, 0); a.rotation.z = sx * .25; g.add(a); const l = new THREE.Mesh(figGeo.limb, mat); l.position.set(sx * .09, .2, 0); g.add(l); }
+  g.scale.setScalar(h / 1.15); g.userData.mat = mat; g.traverse(o => { if (o.isMesh) o.userData.fig = g; }); return g;
+}
+function camoTargets() { return [...H.wallMeshes, ...H.furn.filter(e => !e.dead).map(e => e.obj), ...H.slabMeshes]; }
+const hray = new THREE.Raycaster();
+// find a hiding place: right against a wall or a piece of furniture, coloured (and textured) like that surface
+function hidingSpot(L) {
+  const nF = S.data.floors.length, objs = camoTargets();
+  for (let k = 0; k < 40; k++) {
+    const fi = Math.floor(Math.random() * nF), p = randomSpot(fi, 6), a = Math.random() * 6.28;
+    hray.set(new THREE.Vector3(p.x, p.y + .5, p.z), new THREE.Vector3(Math.sin(a), 0, Math.cos(a))); hray.far = 3;
+    const hit = hray.intersectObjects(objs, true)[0]; if (!hit || !hit.face) continue;
+    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld); if (Math.abs(n.y) > .4) continue; n.y = 0; n.normalize();
+    const mats = Array.isArray(hit.object.material) ? hit.object.material : [hit.object.material], mat = mats[hit.face.materialIndex] || mats[0];
+    if (!mat || !mat.color) continue;
+    const pos = hit.point.clone().addScaledVector(n, .2); pos.y = groundAt(pos.x, pos.z, p.y + .5); if (pos.y < p.y - .3 || hits(pos.x, pos.z, pos.y, .12, true)) continue;
+    if (HD.figs.some(f => f.g.position.distanceTo(pos) < 1.5)) continue;
+    return { pos, n, mat };
+  }
+  return null;
+}
+function camoFig(f, L, keepWhite) {
+  const sp_ = f.spot, mt = f.g.userData.mat, jitter = Math.max(.012, .1 - L * .012) * (Math.random() < .5 ? -1 : 1);
+  f.camo = sp_.mat.color.clone(); if (!sp_.mat.map) { const hsl = {}; f.camo.getHSL(hsl); f.camo.setHSL(hsl.h, hsl.s, clamp(hsl.l + jitter, 0, 1)); }
+  else f.camo.multiplyScalar(1 + jitter * 2);
+  f.map = sp_.mat.map || null; f.rough = sp_.mat.roughness ?? .8;
+  if (!keepWhite) { mt.map = f.map; mt.color.copy(f.camo); mt.roughness = f.rough; mt.needsUpdate = true; }
+}
+function placeFig(f, L) {
+  const sp_ = hidingSpot(L); if (!sp_) return false; f.spot = sp_;
+  const g = f.g; g.position.copy(sp_.pos); g.rotation.set(0, Math.atan2(sp_.n.x, sp_.n.z), 0);
+  const pose = Math.random(); f.pose = pose < .45 ? 'stand' : pose < .8 ? 'crouch' : 'lie';
+  g.children.forEach(c => c.rotation.x = 0);
+  if (f.pose === 'crouch') { g.scale.set(f.s, f.s * .62, f.s); }
+  else if (f.pose === 'lie') { g.scale.setScalar(f.s); g.rotation.x = -Math.PI / 2; g.position.y += .18 * f.s; g.position.addScaledVector(sp_.n, .2); }
+  else g.scale.setScalar(f.s);
+  return true;
+}
+function clearHide() { for (const f of HD.figs) scene.remove(f.g); HD.figs = []; HD.over = false; }
+function startHide(L) {
+  clearHide(); G.level = L; HD.over = false; G.enemies = [];
+  const n = Math.min(26, 5 + L * 2); HD.hints = 3; HD.found = 0; HD.intro = 3.2; HD.moveT = 22; HD.t = 0;
+  HD.time = Math.round(80 + n * 11 - Math.min(40, L * 4));
+  for (let i = 0; i < n; i++) { const s0 = (.55 + Math.random() * .45) * (L >= 4 && Math.random() < .2 ? .6 : 1); const f = { g: makeFig(1.15), s: s0 / 1.15 * 1.15, found: false }; if (!placeFig(f, L)) continue; camoFig(f, L, true); scene.add(f.g); HD.figs.push(f); }
+  setNight(false); lightCfg.intensity = L >= 5 ? 5.5 : 8; lightCfg.flicker = 0;
+  $('#hpbar').style.display = 'none';
+  banner(`👤 捉迷藏 第 ${L} 關`, `${HD.figs.length} 個白色小人正在躲起來…看仔細，用槍射中他們！`, 3000);
+  Snd.giggle(0, .25); setTimeout(() => G.active && Snd.giggle(-.6, .18), 500); setTimeout(() => G.active && Snd.giggle(.7, .18), 900);
+  updateHUD();
+}
+function figHitTest() {
+  const origin = camera.getWorldPosition(new THREE.Vector3()), dir = camFwd().clone(); hray.set(origin, dir); hray.far = 60;
+  const figMeshes = HD.figs.filter(f => !f.found).flatMap(f => f.g.children);
+  return hray.intersectObjects([...figMeshes, ...camoTargets()], true)[0];
+}
+function hideShoot() {
+  if (HD.intro > 0 || HD.over) return;
+  Snd.gun(); fx.kick = .06; swingT = .4;
+  const hit = figHitTest(); if (!hit) return;
+  const fg = hit.object.userData.fig, f = fg && HD.figs.find(x => x.g === fg);
+  if (f) {
+    f.found = true; HD.found++; const mt = f.g.userData.mat; mt.map = null; mt.color.set('#ffffff'); mt.emissive = new THREE.Color('#ffffff'); mt.emissiveIntensity = .6; mt.needsUpdate = true; f.pop = 0;
+    burst(hit.point, '#ffffff', 22, 3, .07, 1, 2, { glow: 1 }); Snd.giggle(0, .3); Snd.coin(); HD.time += 6; floatText('找到了！+6秒', hit.point);
+    G.prof.money = (G.prof.money || 0) + 10 * G.level; vibrate(40);
+    if (HD.found >= HD.figs.length) hideWin();
+  } else {
+    burst(hit.point, '#ffe680', 5, 2, .04, .4); HD.time = Math.max(0, HD.time - 3); floatText('-3秒', hit.point); Snd.tone(160, .08, 'square', .06);
+  }
+  updateHUD();
+}
+function hideHint() {
+  if (HD.over || HD.intro > 0) return; if (HD.hints <= 0) return toast('提示用完了');
+  const left = HD.figs.filter(f => !f.found).sort((a, b) => a.g.position.distanceTo(player.pos) - b.g.position.distanceTo(player.pos)); if (!left.length) return;
+  HD.hints--; const f = left[0]; f.glow = 1.2; giggleAt(f, .35); toast('📡 聽聽看…最近的小人在笑', 1600); updateHUD();
+}
+function giggleAt(f, vol = .2) {
+  const dx = f.g.position.x - player.pos.x, dz = f.g.position.z - player.pos.z, ang = Math.atan2(dx, -dz) + player.yaw, dist = Math.hypot(dx, dz) + Math.abs(f.g.position.y - player.pos.y) * 3;
+  Snd.giggle(Math.sin(ang), clamp(vol * 4 / (2 + dist), .02, vol));
+}
+function hideWin() {
+  HD.over = true; const bonus = 80 * G.level + Math.round(HD.time) * 2; G.prof.money += bonus; G.prof.level = G.level + 1; G.prof.best = Math.max(G.prof.best || 0, G.level); saveProf();
+  Snd.level(); banner(`🎉 第 ${G.level} 關全部找到！`, `剩 ${Math.round(HD.time)} 秒 · 獎金 $${bonus}`, 2200);
+  setTimeout(() => { if (!G.active) return; G.paused = true; showDialog(`🎉 第 ${G.level} 關完成`, `下一關小人更多、偽裝更像，還會偷偷換位置…`, [['▶ 下一關', () => { G.paused = false; startHide(G.level + 1); }], ['🏠 回主選單', () => on.escape && on.escape('menu')]]); }, 2000);
+}
+function hideLose() {
+  HD.over = true; Snd.stinger();
+  for (const f of HD.figs) if (!f.found) { const mt = f.g.userData.mat; mt.map = null; mt.color.set('#ff3355'); mt.emissive = new THREE.Color('#ff2244'); mt.emissiveIntensity = .8; mt.needsUpdate = true; }
+  const left = HD.figs.filter(f => !f.found).length;
+  banner('⏰ 時間到！', `還有 ${left} 個沒找到（紅色的就是）`, 2500);
+  setTimeout(() => { if (!G.active) return; G.paused = true; showDialog('⏰ 時間到', `找到 ${HD.found} / ${HD.figs.length} 個。紅色發光的是沒找到的小人。`, [['🔁 再挑戰這關', () => { G.paused = false; startHide(G.level); }], ['👀 看看他們躲哪', () => { G.paused = false; }], ['🏠 回主選單', () => on.escape && on.escape('menu')]]); }, 2600);
+}
+function updateHide(dt) {
+  HD.t += dt;
+  if (HD.intro > 0) {
+    HD.intro -= dt; const k = clamp(1 - HD.intro / 1.4, 0, 1); // last 1.4 s: white → camouflage
+    for (const f of HD.figs) { const mt = f.g.userData.mat; if (k > 0 && !mt.map && f.map) { mt.map = f.map; mt.needsUpdate = true; } mt.color.setRGB(1, 1, 1).lerp(f.camo, k); mt.roughness = f.rough; }
+    if (HD.intro <= 0) { banner('🔫 開始找！', '在牆邊、家具旁仔細看，有輪廓的就開槍', 1800); Snd.tone(880, .2, 'square', .1); }
+    return;
+  }
+  for (const f of HD.figs) {
+    if (f.found) { f.pop += dt; f.g.position.y += Math.max(0, (.4 - f.pop)) * dt * 3; f.g.rotation.y += dt * 6; if (f.pop > 1.2 && f.g.visible) { f.g.visible = false; burst(f.g.position.clone().add(new THREE.Vector3(0, .5, 0)), '#fff', 10, 2, .05, .6, 1, { glow: 1 }); } continue; }
+    if (f.glow > 0) { f.glow -= dt; const mt = f.g.userData.mat; mt.emissive = mt.emissive || new THREE.Color(); mt.emissive.set('#ffffff'); mt.emissiveIntensity = Math.max(0, Math.sin(f.glow * 12)) * .5; if (f.glow <= 0) mt.emissiveIntensity = 0; }
+    // the creepy part: stare at one from close up and it giggles
+    if (!HD.over && G.level >= 2) { const d = f.g.position.distanceTo(player.pos); if (d < 2.2 && !f.giggled) { const to = f.g.position.clone().sub(camera.position).normalize(); if (to.dot(camFwd()) > .9) { f.giggled = true; giggleAt(f, .25); } } }
+  }
+  if (HD.over) return;
+  // later levels: a figure you're not looking at sneaks to a new place
+  if (G.level >= 3) {
+    HD.moveT -= dt;
+    if (HD.moveT <= 0) {
+      HD.moveT = Math.max(8, 24 - G.level * 2) * (.7 + Math.random() * .6);
+      const cand = HD.figs.filter(f => !f.found && f.g.position.clone().sub(camera.position).normalize().dot(camFwd()) < .2);
+      const f = cand[Math.floor(Math.random() * cand.length)]; if (f && placeFig(f, G.level)) { camoFig(f, G.level); giggleAt(f, .3); toast('…有東西換位置了', 1400); }
+    }
+  }
+  if (G.level >= 4 && Math.random() < dt / 25) Snd.whisper();
+  HD.time -= dt; if (HD.time <= 0) { HD.time = 0; hideLose(); }
+  if (HD.time < 20 && Math.floor(HD.time * 2) !== Math.floor((HD.time + dt) * 2)) Snd.heart();
+}
+
 // ================= adventure: admin-placed monsters, treasure chests, timed buffs =================
 const chests = [];
 function spawnAdv(m) {
   const fi = entFi(m); if (fi < 0 || !allFl()[fi] || !ENEMY[m.type]) return;
   const pos = new THREE.Vector3(m.x, floorY(fi), -m.d), e = spawnEnemy(m.type, pos, 1);
   e.adv = m; e.hp = e.max = e.d.hp * (m.hp || 1); e.spd = e.d.spd * (m.speed || 1); e.dmg = e.d.dmg * (m.dmg ?? 1); e.home = pos.clone();
+  if ((m.scale || 1) !== 1) { e.sc = m.scale; e.r *= Math.min(m.scale, 1.6); e.hp = e.max *= m.scale; mesh_scale(e); }
   if (e.d.boss && m.mode !== 'active') { G.boss = null; $('#bossbar').classList.remove('show'); }
+}
+function mesh_scale(e) { e.mesh.scale.setScalar(e.sc); }
+// backroom levels the admin left empty still get monsters; deeper levels: more, faster, bigger
+function fillBackrooms() {
+  const zs = (S.data.zones || []).filter(z => z.kind === 'backroom');
+  zs.forEach((z, k) => {
+    const fi = allFl().indexOf(z), have = (S.data.monsters || []).filter(m => m.zid === z.id).length, want = 3 + k * 2;
+    for (let i = have; i < want; i++) {
+      const r = z.rooms[0]; if (!r) break;
+      const type = ['smiler', 'hound', 'lady', 'smiler', 'jiangshi'][(i + k) % 5], mode = i % 4 === 3 ? 'scare' : 'active';
+      const m = { id: 'auto' + z.id + i, type, mode, speed: 1 + k * .12, hp: 1 + k * .3, dmg: 1 + k * .2, range: mode === 'scare' ? 4 : 9 + k * 2, respawn: 45, zid: z.id, scale: Math.random() < .12 + k * .08 ? 1.8 + Math.random() * .6 : 1 };
+      for (let t = 0; t < 30; t++) { m.x = r.x0 + 1.25 + Math.floor(Math.random() * ((r.x1 - r.x0) / 2.5)) * 2.5; m.d = r.d0 + 1.25 + Math.floor(Math.random() * ((r.d1 - r.d0) / 2.5)) * 2.5; if (Math.hypot(m.x - 1.25, m.d - 1.25) > 6) break; }
+      spawnAdv(m);
+    }
+  });
 }
 function chestMesh() {
   const g = new THREE.Group(), w = M('#8a5524', { r: .7 }), gold = M('#e0b030', { m: .8, r: .3, e: '#6a4a00', ei: .4 });
@@ -733,12 +983,15 @@ function chestMesh() {
 function startAdventure() {
   setNight(false); lightCfg.intensity = 8; lightCfg.flicker = 0;
   for (const m of S.data.monsters || []) spawnAdv(m);
+  fillBackrooms();
   for (const c of S.data.chests || []) {
     const fi = entFi(c); if (fi < 0 || !allFl()[fi]) continue;
     const mesh = chestMesh(); mesh.position.set(c.x, floorY(fi), -c.d); mesh.rotation.y = (c.rot || 0) * DEG; scene.add(mesh);
     chests.push({ c, fi, mesh, open: false, t: 0, re: 0 });
   }
-  banner('🗝 探險模式', '探索地下室、下水道…找寶箱、打怪物。靠近寶箱按 E / ✋', 3000); updateHUD();
+  if (G.auto) { banner('⚠️ 你進入了後室', '這裡的東西會攻擊你！點擊/⚔️ 攻擊，離開後室就恢復參觀', 3200); Snd.stinger(); }
+  else banner('🗝 探險模式', '探索地下室、下水道…找寶箱、打怪物。靠近寶箱按 E / ✋', 3000);
+  updateHUD();
 }
 function clearAdventure() { for (const c of chests) scene.remove(c.mesh); chests.length = 0; }
 function nearChest() {
@@ -775,6 +1028,8 @@ function giveLoot(loot, pos) {
   saveProf(); updateHUD();
 }
 function updateAdventure(dt) {
+  const z = zoneOf(floorOf(player.pos.y));
+  if (z?.kind === 'backroom') { const k = (S.data.zones || []).filter(q => q.kind === 'backroom').indexOf(z); horrorEvents(dt, 3 + k * 2, z); }
   const b = G.buffs; for (const k in b) if (b[k] > 0) { b[k] -= dt; if (b[k] <= 0) toast({ speed: '加速結束', power: '攻擊力恢復', shield: '護盾消失' }[k], 1200); }
   const k = (1 + G.prof.spdLv * .08) * (b.speed > 0 ? 1.6 : 1); player.speed = 2.4 * k; player.run = 4.4 * k;
   for (const c of chests) {

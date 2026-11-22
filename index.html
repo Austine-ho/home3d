@@ -65,7 +65,7 @@ body:not([data-mode=visit]) #btnNight{display:none}
 #tbtns [data-act=heal]{width:52px;height:52px;right:0;bottom:170px;font-size:20px}
 body[data-mode=visit] #tbtns [data-act=heal]{display:none}
 #potions{position:absolute;left:240px;bottom:calc(12px + var(--sab));pointer-events:auto;background:rgba(0,0,0,.55);font-size:14px;padding:3px 10px}
-body[data-kind=destroy] #potions,body[data-kind=destroy] #tbtns [data-act=heal]{display:none}
+body[data-kind=destroy] #potions,body[data-kind=destroy] #tbtns [data-act=heal],body[data-kind=hide] #potions{display:none}
 body.touch #potions{display:none}
 #tbtns [data-act=run]{width:52px;height:52px;right:150px;bottom:40px;font-size:18px}
 body.touch[data-mode=visit] #tbtns,body.touch[data-mode=game] #tbtns{display:block}
@@ -90,7 +90,9 @@ body.touch .phelp{display:none}
 #ptop b{white-space:nowrap;margin-right:6px} #pfloors{display:flex;gap:4px} #ptop .sp{flex:1}
 #ptop button{white-space:nowrap;padding:6px 10px}
 #ptools{position:absolute;left:8px;top:calc(62px + var(--sat));display:flex;flex-direction:column;gap:5px;z-index:2}
-#ptools button{display:flex;flex-direction:column;align-items:center;font-size:11px;padding:6px 4px;width:64px;background:rgba(20,24,30,.92)}
+#ptools button{display:flex;flex-direction:column;align-items:center;font-size:11px;padding:6px 4px;width:64px;background:rgba(20,24,30,.92);flex:none}
+#ptools{max-height:calc(100vh - 80px - var(--sat));overflow-y:auto}
+.alist{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto}.aitem{text-align:left;font-size:12px;padding:5px 8px;background:#2a2340}
 #ptools button span{font-size:20px} #ptools button.on{background:var(--acc)}
 #ptools button.adm{border:1px solid #9a6cff} #ptools button.adm.on{background:#7a4cff}
 #pfloors button.zone{background:#2a3324} #pfloors button.adm{background:#3a2a5a;border:1px solid #9a6cff} #pfloors button.on{background:var(--acc)}
@@ -161,7 +163,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 <div id="menu">
   <div class="wrap">
     <h1>🏠 我家 3D</h1>
-    <p class="sub">依照錄影建立的三層樓透天厝：可以參觀、改裝潢、改格局，還有地下室、下水道和四款小遊戲</p>
+    <p class="sub">依照錄影建立的三層樓透天厝：可以參觀、改裝潢、改格局，還有地下室、下水道、後室和五款小遊戲</p>
     <div class="cards">
       <button data-go="visit"><span class="em">🚶</span><b>參觀</b><small>第一人稱逛 1F～3F、地下室和馬路，開門、開燈、日夜切換</small></button>
       <button data-go="edit"><span class="em">🛋</span><b>改裝潢</b><small>在 3D 裡搬家具、換油漆、地板、壁紙</small></button>
@@ -172,10 +174,11 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
       <button data-go="game:clean"><span class="em">🪳</span><b>清潔大作戰</b><small>掃把、水槍、殺蟲劑消滅蟑螂蚊子老鼠，打倒蟑螂王</small><span class="prog" id="prog-clean"></span></button>
       <button data-go="game:ghost"><span class="em">👻</span><b>驅鬼大師</b><small>艾草棒、聖水槍、符咒驅鬼，關卡越來越難，最後對決鬼王</small><span class="prog" id="prog-ghost"></span></button>
       <button data-go="game:destroy"><span class="em">🔨</span><b>拆家狂人</b><small>鐵鎚、武士刀、手榴彈、大砲把整個家拆光，隨時可復原</small><span class="prog" id="prog-destroy"></span></button>
+      <button data-go="game:hide"><span class="em">👤</span><b>捉迷藏</b><small>白色小人變成保護色躲在家裡各處，看仔細用槍把他們找出來，越後面越難找</small><span class="prog" id="prog-hide"></span></button>
       <button data-go="game:adventure"><span class="em">🗝</span><b>探險模式</b><small>走進地下室、下水道、神秘傳送門，開寶箱拿武器與道具，打倒怪物</small><span class="prog" id="prog-adventure"></span></button>
     </div>
     <div class="sect">⚙️ 設定</div>
-    <div class="rowb"><button id="btnExport">⬇ 匯出設計</button><button id="btnImport">⬆ 匯入設計</button><input type="file" id="fileIn" accept=".json" hidden><button id="btnShot">📷 截圖</button><button id="btnFull">⛶ 全螢幕</button><button id="btnReset" class="danger">↺ 還原原始格局</button><button id="btnAdmin">🔐 管理員</button></div>
+    <div class="rowb"><button id="btnExport">⬇ 匯出設計</button><button id="btnImport">⬆ 匯入設計</button><input type="file" id="fileIn" accept=".json" hidden><button id="btnShot">📷 截圖</button><button id="btnFull">⛶ 全螢幕</button><button class="btnMusic">🎵</button><button id="btnReset" class="danger">↺ 還原原始格局</button><button id="btnAdmin">🔐 管理員</button></div>
     <div class="keys">
       <kbd>W A S D</kbd><span>移動</span><kbd>滑鼠</kbd><span>轉視角</span>
       <kbd>Shift</kbd><span>跑步</span><kbd>空白鍵</kbd><span>跳</span>
@@ -191,7 +194,7 @@ body.touch #wbar button{min-width:46px;font-size:18px;padding:3px}
 <div id="hint"></div>
 <div id="tag"></div>
 <div id="flname"></div>
-<div id="topr"><div id="floorbtns"></div><button id="btnHome" title="回家 (G)">🏠 回家</button><button id="btnNight">🌓</button><button id="pauseBtn">☰ 選單</button></div>
+<div id="topr"><div id="floorbtns"></div><button id="btnHome" title="回家 (G)">🏠 回家</button><button id="btnNight">🌓</button><button class="btnMusic">🎵</button><button id="pauseBtn">☰ 選單</button></div>
 <div id="toast"></div>
 <div id="joy"><div id="joyKnob"></div></div>
 <div id="tbtns">

@@ -56,7 +56,7 @@ function buildToolbar() {
   $('#pfloors').innerHTML = allFl().map((f, i) => vis(f) ? `<button data-f="${i}" class="${i === P.fi ? 'on' : ''} ${i >= nF() ? 'zone' : ''} ${f.admin ? 'adm' : ''}">${f.name}</button>` : '').join('') + `<button id="pAddF" title="新增樓層">＋</button>` + (S.admin ? `<button id="pAddBR" title="新增後室">＋後室</button>` : '');
   $('#pfloors').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { P.fi = +b.dataset.f; if (!P.pickTarget) P.sel = null; buildToolbar(); renderProps(); fit(); draw(); });
   $('#pAddF').onclick = addFloor; if ($('#pAddBR')) $('#pAddBR').onclick = addBackroom;
-  const tools = S.admin ? [...TOOLS, ...ADMIN_TOOLS] : TOOLS;
+  const tools = S.admin ? [TOOLS[0], ...ADMIN_TOOLS, ...TOOLS.slice(1)] : TOOLS;
   $('#ptools').innerHTML = tools.map(([id, ic, n]) => `<button data-t="${id}" class="${P.tool === id ? 'on' : ''} ${ADMIN_TOOLS.some(t => t[0] === id) ? 'adm' : ''}"><span>${ic}</span>${n}</button>`).join('');
   $('#ptools').querySelectorAll('[data-t]').forEach(b => b.onclick = () => { P.tool = b.dataset.t; if (P.tool === 'furn') showCatalog(); if (P.tool === 'env') { P.sel = null; renderProps(); } buildToolbar(); hintTool(); });
   $('#pSnap').classList.toggle('on', P.snap);
@@ -205,8 +205,9 @@ function drawEntities() {
   if (!S.admin) return;
   for (const m of S.data.monsters || []) {
     if (!onFloor(m)) continue; const [sx, sy] = toS(m.x, m.d), sel = isSel('monster', m);
+    if (m.mode === 'scare') { ctx.strokeStyle = 'rgba(190,90,255,.5)'; ctx.setLineDash([2, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(sx, sy, (m.range || 4) * P.s, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
     if (m.mode === 'active') { ctx.strokeStyle = 'rgba(255,80,80,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(sx, sy, (m.range || 10) * P.s, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-    ctx.fillStyle = sel ? '#ffb020' : m.mode === 'active' ? 'rgba(230,60,60,.9)' : 'rgba(90,160,90,.9)'; ctx.beginPath(); ctx.arc(sx, sy, Math.max(8, .32 * P.s), 0, 7); ctx.fill();
+    ctx.fillStyle = sel ? '#ffb020' : m.mode === 'active' ? 'rgba(230,60,60,.9)' : m.mode === 'scare' ? 'rgba(160,70,230,.95)' : 'rgba(90,160,90,.9)'; ctx.beginPath(); ctx.arc(sx, sy, Math.max(8, .32 * P.s), 0, 7); ctx.fill();
     label(MICON[m.type] || '👾', m.x, m.d, '#fff', 13);
   }
   for (const c of S.data.chests || []) {
@@ -413,6 +414,24 @@ function sideName(w, side) {
   const r = fl().rooms.filter(r => px > r.x0 && px < r.x1 && pd > r.d0 && pd < r.d1).sort((a, b) => (a.x1 - a.x0) * (a.d1 - a.d0) - (b.x1 - b.x0) * (b.d1 - b.d0))[0];
   return `${side.toUpperCase()} 面顏色：${r ? r.name + ' 這一側' : '屋外這一側'}`;
 }
+// admin overview: one-tap tools and every portal / monster / chest on this floor
+function adminList() {
+  const ms = (S.data.monsters || []).filter(onFloor), cs = (S.data.chests || []).filter(onFloor), ps = (S.data.portals || []).filter(onFloor);
+  const MODE = { active: '主動', passive: '被動', scare: '嚇人' };
+  const row = (k, i, ic, t) => `<button class="aitem" data-ak="${k}" data-ai="${i}">${ic} ${t}</button>`;
+  return `<div class="grp">🔐 管理員：在地圖上點一下放置</div>
+    <div class="rowb"><button data-at="monster">👾 加怪物</button><button data-at="chest">🎁 加寶箱</button><button data-at="portal">🌀 加傳送門</button><button data-at="env">🌤 環境</button></div>
+    <div class="grp">這層的怪物（${ms.length}）</div><div class="alist">${ms.map((m, i) => row('monster', i, MICON[m.type] || '👾', `${MONSTER_TYPES[m.type]?.split(' ')[1] || m.type} · ${MODE[m.mode] || '被動'}${(m.scale || 1) !== 1 ? ' · ×' + m.scale : ''}`)).join('') || '<small>（沒有）</small>'}</div>
+    <div class="grp">這層的寶箱（${cs.length}）</div><div class="alist">${cs.map((c, i) => row('chest', i, '🎁', LOOTS[c.loot || 'random'] || c.loot)).join('') || '<small>（沒有）</small>'}</div>
+    <div class="grp">這層的傳送門（${ps.length}）</div><div class="alist">${ps.map((q, i) => row('portal', i, '🌀', `${q.name || '傳送門'} → ${q.to ? flName(q.to) : '未設定'}`)).join('') || '<small>（沒有）</small>'}</div>`;
+}
+function bindAdminList(el) {
+  el.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { P.tool = b.dataset.at; buildToolbar(); hintTool(); if (P.tool === 'env') renderProps(); else toast('在地圖上點一下放置'); });
+  el.querySelectorAll('[data-ak]').forEach(b => b.onclick = () => {
+    const k = b.dataset.ak, arr = ({ monster: S.data.monsters, chest: S.data.chests, portal: S.data.portals }[k] || []).filter(onFloor), o = arr[+b.dataset.ai];
+    if (o) { P.sel = { k, o }; P.tool = 'select'; buildToolbar(); renderProps(); draw(); }
+  });
+}
 export function renderProps() {
   const el = $('#pprops'), s = P.sel;
   if (!s) {
@@ -420,7 +439,9 @@ export function renderProps() {
     if (P.tool === 'env' && S.admin) return envProps();
     el.innerHTML = `<div class="ph">${fl().name} 平面圖</div><div class="tip">・點選房間、牆、門窗、家具或樓梯來修改<br>・拖曳房間的黃色方塊調整尺寸<br>・拖曳牆的端點改長度，相連的牆會一起動<br>・用左邊工具畫牆、框新空間、加門窗<br>・修改會自動存檔並更新 3D</div>
       <div class="rowb"><button id="pRename">✏️ 樓層名稱</button><button id="pDelF">🗑 刪除此${P.fi >= nF() ? '區域' : '樓層'}</button></div>${S.admin ? '<div class="tip">🔐 管理員模式：這裡新增的空間、牆、家具、傳送門、怪物、寶箱，一般使用者在空間編輯看不到（遊戲裡看得到）。</div>' : ''}`;
-    el.classList.toggle('show', innerWidth > 760);
+    if (S.admin) el.innerHTML = `<div class="ph">🔐 ${fl().name}</div>` + adminList() + `<div class="rowb"><button id="pRename">✏️ 名稱</button><button id="pDelF">🗑 刪除此${P.fi >= nF() ? '區域' : '樓層'}</button><button id="pHideA">▾ 收起</button></div>`;
+    el.classList.toggle('show', innerWidth > 760 || S.admin);
+    if (S.admin) { bindAdminList(el); $('#pHideA').onclick = () => el.classList.remove('show'); }
     $('#pRename').onclick = () => { const n = prompt('樓層名稱', fl().name); if (n) { fl().name = n; buildToolbar(); commit(); } };
     $('#pDelF').onclick = delFloor; return;
   }
@@ -472,9 +493,10 @@ export function renderProps() {
   } else if (s.k === 'monster') {
     const o = s.o;
     h = `<div class="ph">👾 怪物</div><label class="pf"><span>種類</span><select data-k="type">${Object.entries(MONSTER_TYPES).map(([k, n]) => `<option value="${k}" ${k === o.type ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-      <label class="pf"><span>行為</span><select data-k="mode"><option value="active" ${o.mode === 'active' ? 'selected' : ''}>主動（看到就追）</option><option value="passive" ${o.mode !== 'active' ? 'selected' : ''}>被動（被打才反擊）</option></select></label>
-      ${num('速度 ×', 'speed', o.speed ?? 1, .1, .2, 4)}${num('血量 ×', 'hp', o.hp ?? 1, .1, .2, 20)}${num('攻擊力 ×', 'dmg', o.dmg ?? 1, .1, 0, 10)}${num('偵測範圍 (m)', 'range', o.range ?? 10, .5, 1, 40)}${num('重生秒數 (0=不重生)', 'respawn', o.respawn ?? 60, 5, 0, 900)}
+      <label class="pf"><span>行為</span><select data-k="mode"><option value="active" ${o.mode === 'active' ? 'selected' : ''}>主動（看到就追）</option><option value="passive" ${o.mode === 'passive' || !o.mode ? 'selected' : ''}>被動（被打才反擊）</option><option value="scare" ${o.mode === 'scare' ? 'selected' : ''}>嚇人（靠近就衝到眼前）</option></select></label>
+      ${num('體型 ×', 'scale', o.scale ?? 1, .1, .4, 4)}${num('速度 ×', 'speed', o.speed ?? 1, .1, .2, 4)}${num('血量 ×', 'hp', o.hp ?? 1, .1, .2, 20)}${num('攻擊力 ×', 'dmg', o.dmg ?? 1, .1, 0, 10)}${num(o.mode === 'scare' ? '觸發距離 (m)' : '偵測範圍 (m)', 'range', o.range ?? 10, .5, 1, 40)}${num('重生秒數 (0=不重生)', 'respawn', o.respawn ?? 60, 5, 0, 900)}
       ${num('X', 'x', o.x)}${num('深度', 'd', o.d)}
+      <div class="tip">${o.mode === 'scare' ? '嚇人：平常站著不動，玩家走進觸發距離就衝到螢幕前尖叫，之後消失一段時間再回來。' : o.mode === 'active' ? '主動：玩家進入偵測範圍就追上來攻擊（地圖上紅色虛線圈）。' : '被動：在家附近閒晃，被打才會反擊。'}　探險模式與參觀後室時出現。</div>
       <div class="rowb"><button id="pDupE">⧉ 複製</button><button id="pDel" class="danger">🗑 刪除</button></div>`;
   } else if (s.k === 'chest') {
     const o = s.o;

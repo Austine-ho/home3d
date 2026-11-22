@@ -470,6 +470,32 @@ export function hits(x, z, feet, r = 0.24, ignoreDoors = false) {
   }
   return false;
 }
+// slide instead of stopping: push a circle at (x,z) out of every wall, door and solid it overlaps
+export function pushOut(x, z, feet, r = 0.24) {
+  const lo = feet + 0.36, hi = feet + 1.7, segs = [...H.segs, ...doorSegs()];
+  for (let it = 0; it < 4; it++) {
+    let moved = false;
+    for (const s of segs) {
+      if (s.dead || s.y1 <= lo || s.y0 >= hi) continue;
+      const [d2, t, L] = segDist2(x, z, s), rr = r + s.half;
+      if (d2 >= rr * rr) continue;
+      if (s.grid && !gridBlocks(s, t, L, r, Math.max(lo, s.y0), Math.min(hi, s.y1 - .01))) continue;
+      const cx = s.ax + (s.bx - s.ax) * t, cz = s.az + (s.bz - s.az) * t, d = Math.sqrt(d2);
+      let nx, nz; if (d > 1e-4) { nx = (x - cx) / d; nz = (z - cz) / d; } else { nx = -(s.bz - s.az) / (L || 1); nz = (s.bx - s.ax) / (L || 1); }
+      x = cx + nx * (rr + .001); z = cz + nz * (rr + .001); moved = true;
+    }
+    for (const c of H.solids) {
+      if (c.max.y <= lo || c.min.y >= hi) continue;
+      const cx = clamp(x, c.min.x, c.max.x), cz = clamp(z, c.min.z, c.max.z), d2 = (x - cx) ** 2 + (z - cz) ** 2;
+      if (d2 >= r * r) continue;
+      if (d2 > 1e-8) { const d = Math.sqrt(d2); x = cx + (x - cx) / d * (r + .001); z = cz + (z - cz) / d * (r + .001); }
+      else { const opts = [[c.min.x - r - .001 - x, 0], [c.max.x + r + .001 - x, 0], [0, c.min.z - r - .001 - z], [0, c.max.z + r + .001 - z]].sort((a, b) => Math.abs(a[0] + a[1]) - Math.abs(b[0] + b[1]))[0]; x += opts[0]; z += opts[1]; }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return [x, z];
+}
 export function groundAt(x, z, feet) {
   let g = -100; const lim = feet + 0.38;
   for (const c of H.cells) if (c.y <= lim && c.y > g && x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1) g = c.y;

@@ -2,10 +2,11 @@
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, PRESETS, presetColor, tex, DEG, clamp } from './core.js';
 import { CAT } from './catalog.js';
 import { defaultHouse, migrate, DEFAULT_REV } from './data.js';
-import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH, allFl, entFi, nearPortal } from './house.js';
+import { stairGeom, H, build, updateHouse, setNight, toggleDoor, setLamp, spawnFurniture, removeFurnitureEntry, refreshFurnBox, refreshSolids, paintSurface, floorOf, floorY, FH, allFl, entFi, nearPortal, zoneOf } from './house.js';
 import { player, input, on, fx, updatePlayer, requestLock, releaseLock, locked } from './controls.js';
 import { openPlan, closePlan, Plan } from './plan.js';
-import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion, advInteract, advHint } from './games.js';
+import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion, advInteract, advHint, openPause, showDialog } from './games.js';
+import { Music } from './music.js';
 
 // ---------- save / load ----------
 const KEY = 'home3d_design_v2';
@@ -18,6 +19,7 @@ rebuild();
 
 // ---------- modes ----------
 const MODE_TAG = { visit: '🚶 參觀', edit: '🛋 改裝潢', game: '' };
+let autoCombat = false;
 function setMode(m, opt) {
   const prev = S.mode;
   if (prev === 'plan' && m !== 'plan') { closePlan(); S.admin = false; if (dirty) { rebuild(); renderFloorBtns(); } }
@@ -32,18 +34,35 @@ function setMode(m, opt) {
   input.look = m !== 'plan' && m !== 'menu';
   if (m === 'visit' || m === 'game') requestLock(); else releaseLock();
   if (m === 'plan') { S.admin = opt === 'admin'; Plan.fi = floorOf(player.pos.y); openPlan(); }
-  if (m === 'game') { startGame(opt, S.data); if (isTouch && innerHeight > innerWidth) setTimeout(() => toast('📱 建議把手機橫放來玩'), 2600); }
+  Music.setMood(m === 'game' ? 'tense' : 'calm');
+  if (m === 'game') { startGame(opt, S.data, { auto: autoCombat }); autoCombat = false; if (isTouch && innerHeight > innerWidth) setTimeout(() => toast('📱 建議把手機橫放來玩'), 2600); }
   if (m === 'menu') updateMenu();
 }
 Plan.onChange = () => { dirty = true; };
-on.escape = (to) => { if (to === 'menu' || S.mode === 'visit' || S.mode === 'game') setMode('menu'); };
-document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { Snd.init(); const [m, o] = b.dataset.go.split(':'); setMode(m, o); });
+on.escape = (to) => { if (to === 'menu' || S.mode === 'visit') setMode('menu'); else if (S.mode === 'game') openPause(); };
+const clearSave = k => { try { localStorage.removeItem('home_game_' + k); } catch (e) { } };
+document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => {
+  Snd.init(); Music.start(); const [m, o] = b.dataset.go.split(':');
+  // a game with saved progress: continue or start over
+  if (m === 'game') {
+    let p = null; try { p = JSON.parse(localStorage.getItem('home_game_' + o)); } catch (e) { }
+    if (p) {
+      const info = o === 'destroy' || o === 'adventure' ? `💰 $${p.money}` : `第 ${p.level || 1} 關 · 💰 $${p.money}`;
+      return showDialog(b.querySelector('b').textContent, `有存檔：${info}`, [['▶ 繼續', () => setMode('game', o)], ['🆕 重新開始', () => showDialog('確定重新開始？', '金錢、武器和關卡都會清空。', [['🆕 確定', () => { clearSave(o); setMode('game', o); }], ['取消', () => { }]])], ['✖ 取消', () => { }]]);
+    }
+  }
+  setMode(m, o);
+});
+addEventListener('pointerdown', () => { if (Music.on && !Music.timer) Music.start(); }, { once: true });
+const musicBtns = () => document.querySelectorAll('.btnMusic').forEach(b => { b.textContent = Music.on ? '🎵' : '🔇'; b.title = Music.on ? '背景音樂：開' : '背景音樂：關'; });
+document.querySelectorAll('.btnMusic').forEach(b => b.onclick = e => { e.stopPropagation(); Music.toggle(); musicBtns(); toast(Music.on ? '🎵 背景音樂開' : '🔇 背景音樂關', 900); });
+musicBtns();
 $('#btnAdmin').onclick = () => {
   let ok = false; try { ok = sessionStorage.getItem('home3d_admin') === '1'; } catch (e) { }
   if (!ok) { const pw = prompt('🔐 管理員密碼'); if (pw === null) return; if (pw.trim() !== '3') return toast('密碼錯誤'); try { sessionStorage.setItem('home3d_admin', '1'); } catch (e) { } }
   setMode('plan', 'admin'); toast('🔐 已進入管理員遊戲編輯');
 };
-$('#pauseBtn').onclick = () => setMode('menu');
+$('#pauseBtn').onclick = () => S.mode === 'game' ? openPause() : setMode('menu');
 $('#pDone2').onclick = () => setMode('visit');
 function updateMenu() {
   const g = k => { try { return JSON.parse(localStorage.getItem('home_game_' + k)) || {}; } catch (e) { return {}; } };
@@ -52,6 +71,7 @@ function updateMenu() {
   $('#prog-ghost').textContent = gh.level ? `第 ${gh.level} 關 · $${gh.money}` : '新遊戲';
   $('#prog-destroy').textContent = d.money != null ? `$${d.money}` : '新遊戲';
   const a = g('adventure'); $('#prog-adventure').textContent = a.money != null ? `$${a.money}` : '新遊戲';
+  const hd = g('hide'); $('#prog-hide').textContent = hd.level ? `第 ${hd.level} 關` : '新遊戲';
 }
 on.key = e => {
   if (e.code === 'Escape' && (S.mode === 'edit' || S.mode === 'plan')) { if (S.mode === 'edit' && sel) { selectFurn(null); return; } if (S.mode === 'plan') return; setMode('menu'); }
@@ -239,6 +259,10 @@ function loop() {
   updatePlayer(dt, t, canMove && !dragging);
   updateHouse(dt, t);
   if (S.mode === 'visit' || S.mode === 'game') updatePortals(dt);
+  // the backrooms are dangerous even while just visiting: combat switches on inside, off again once you're out
+  const inBR = zoneOf(floorOf(player.pos.y))?.kind === 'backroom';
+  if (S.mode === 'visit' && inBR) { autoCombat = true; setMode('game', 'adventure'); }
+  else if (S.mode === 'game' && Game.auto && !inBR && !Game.paused) { setMode('visit'); toast('離開後室，回到參觀模式'); }
   updateGame(dt);
   if (selBox.visible && sel) selBox.box.copy(sel.box);
   hintT -= dt;
