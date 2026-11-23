@@ -113,7 +113,7 @@ function doorAhead(maxD = 1.6) {
   }
   return best ? { door: best, dist: bd } : null;
 }
-function interact() { if (S.mode === 'game' && advInteract()) return; const pt = nearPortal(player.pos); if (pt && !autoPortal(pt.p)) return usePortal(pt.p); const a = aim() || doorAhead(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp) setLamp(a.lamp, !a.lamp.on); }
+function interact() { if (S.mode === 'game' && advInteract()) return; const pt = nearPortal(player.pos); if (pt && !autoPortal(pt.p)) return usePortal(pt.p); const a = aim() || doorAhead(); if (a?.door) { toggleDoor(a.door); Snd.init(); Snd.tone(220, .08, 'triangle', .08); } else if (a?.lamp && S.mode !== 'prop') setLamp(a.lamp, !a.lamp.on); }
 on.interact = interact; on.heal = usePotion; $('#potions').onclick = () => usePotion();
 $('#btnNight').onclick = () => setNight(!S.night);
 // 🏠 back home: just inside the front door on 1F (also the fix for being locked out)

@@ -3,7 +3,7 @@
 // devices, game traffic goes device-to-device). The device that creates the room runs the round and relays states.
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, clamp } from './core.js';
 import { CAT, buildFurniture, footprint } from './catalog.js';
-import { H, BODY, build, pushOut } from './house.js';
+import { H, BODY, build, pushOut, lightCfg, setLamp } from './house.js';
 import { player, input, on, fx, releaseLock, locked } from './controls.js';
 import { Snd, showDialog } from './games.js';
 
@@ -192,6 +192,7 @@ function startRound(m) {
   closeLobby(); $('#dialog').classList.remove('show');
   if (!P.ownData) P.ownData = S.data;
   S.data = JSON.parse(JSON.stringify(m.data)); build(S.data);
+  lightCfg.flicker = 0; lightCfg.intensity = 8; H.lamps.forEach(l => setLamp(l, true)); // prop hunt: every light stays on
   P.players = m.players; P.seeker = m.seeker; P.caught = new Set(); P.states = {};
   P.role = m.seeker === P.myId ? 'seeker' : 'hider';
   DASHES = m.dashes || 3; P.hp = 100; P.dash = DASHES; P.spray = 1; P.blindT = 0; P.boostT = 0; P.cat = '常用'; P.slot = 'me'; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;

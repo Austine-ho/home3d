@@ -577,15 +577,29 @@ export function updateHouse(dt, t) {
     if (d.kind === 'hinge') d.pivot.rotation.y = d.base + d.delta * d.t; else d.update();
   }
   for (const e of H.furn) { if (e.spin) e.spin.rotation.z += dt * 12; if (e.spinY) e.spinY.rotation.y += dt * 6; }
+  const full = lightCfg.intensity * lightCfg.mult;
   poolT -= dt;
   if (poolT <= 0) {
     poolT = .25;
     const cp = camera.position;
-    const lit = H.lamps.filter(l => l.on).map(l => [l, (l.x - cp.x) ** 2 + (l.z - cp.z) ** 2 + ((l.y - cp.y) * 2.5) ** 2]).sort((a, b) => a[1] - b[1]);
-    pool.forEach((L, i) => { const e = lit[i]; if (e) { L.position.set(e[0].x, e[0].y - .25, e[0].z); L.intensity = lightCfg.intensity * lightCfg.mult; } else L.intensity = 0; });
+    // the few real lights go to the lamps nearest the camera. A lamp that already has a light keeps it
+    // unless another lamp is clearly closer (stops lights hopping around while you run), and lights fade in/out
+    const held = new Set(pool.map(L => L.userData.lamp).filter(Boolean));
+    const want = H.lamps.filter(l => l.on).map(l => [l, ((l.x - cp.x) ** 2 + (l.z - cp.z) ** 2 + ((l.y - cp.y) * 2.5) ** 2) * (held.has(l) ? .55 : 1)]).sort((a, b) => a[1] - b[1]).slice(0, pool.length).map(e => e[0]);
+    const wantSet = new Set(want);
+    for (const L of pool) if (L.userData.lamp && !wantSet.has(L.userData.lamp)) L.userData.lamp = null;
+    const free = want.filter(l => !pool.some(L => L.userData.lamp === l));
+    for (const L of pool) if (!L.userData.lamp && (L.userData.base ?? 0) < full * .04 && free.length) { const l = free.shift(); L.userData.lamp = l; L.position.set(l.x, l.y - .25, l.z); }
     applyEnv();
   }
-  if (lightCfg.flicker > 0) pool.forEach(L => { if (L.intensity > 0) L.intensity = lightCfg.intensity * lightCfg.mult * (Math.random() < lightCfg.flicker ? .05 : 1); });
+  // fade every light toward its target (instant drops only for the scary flicker effect)
+  const fk = Math.min(1, dt * 6);
+  for (const L of pool) {
+    if (L.userData.lamp && !L.userData.lamp.on) L.userData.lamp = null;
+    const tgt = L.userData.lamp ? full : 0, b0 = L.userData.base ?? 0;
+    L.userData.base = b0 + (tgt - b0) * (tgt < b0 ? Math.min(1, dt * 10) : fk);
+    L.intensity = L.userData.base * (lightCfg.flicker > 0 && Math.random() < lightCfg.flicker ? .05 : 1);
+  }
   for (const p of H.portals) if (p.spin) { p.spin.rotation.z += dt * 2.5; p.spin.material.emissiveIntensity = 1.2 + Math.sin(t * 4) * .4; }
   updateFlakes(dt, t);
 }
