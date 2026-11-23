@@ -450,8 +450,10 @@ function doorSegs() {
   }
   return doorSegCache;
 }
+// the player's body (shrunk in 道具躲貓貓 so you can crawl under tables)
+export const BODY = { lo: .36, hi: 1.7 };
 export function hits(x, z, feet, r = 0.24, ignoreDoors = false) {
-  const lo = feet + 0.36, hi = feet + 1.7;
+  const lo = feet + BODY.lo, hi = feet + BODY.hi;
   for (const s of H.segs) {
     if (s.dead || s.y1 <= lo || s.y0 >= hi) continue;
     const [d2, t, L] = segDist2(x, z, s), rr = r + s.half;
@@ -472,7 +474,7 @@ export function hits(x, z, feet, r = 0.24, ignoreDoors = false) {
 }
 // slide instead of stopping: push a circle at (x,z) out of every wall, door and solid it overlaps
 export function pushOut(x, z, feet, r = 0.24) {
-  const lo = feet + 0.36, hi = feet + 1.7, segs = [...H.segs, ...doorSegs()];
+  const lo = feet + BODY.lo, hi = feet + BODY.hi, segs = [...H.segs, ...doorSegs()];
   for (let it = 0; it < 4; it++) {
     let moved = false;
     for (const s of segs) {

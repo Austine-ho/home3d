@@ -2,9 +2,9 @@
 import { THREE, S, camera, renderer, isTouch, $, clamp, toast } from './core.js';
 import { hits, groundAt, pushOut } from './house.js';
 
-export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 4.4, run: 6.2, eye: 1.58, bob: 0 };
+export const player = { pos: new THREE.Vector3(2.9, 0, 2.4), vy: 0, yaw: 0, pitch: -.05, ground: true, speed: 4.4, run: 6.2, eye: 1.58, r: .24, jump: 4.2, bob: 0 };
 export const input = { keys: {}, jx: 0, jy: 0, look: true, attack: false };
-export const on = { home: null, heal: null, interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
+export const on = { propDown: null, propUp: null, home: null, heal: null, interact: null, attackDown: null, attackUp: null, switchW: null, key: null, escape: null };
 export const fx = { shake: 0, kick: 0 };
 
 const cvs = renderer.domElement;
@@ -28,7 +28,7 @@ addEventListener('keydown', e => {
   input.keys[e.code] = true;
   if (e.code === 'Tab') e.preventDefault();
   // Alt (Option on Mac): let go of the mouse so the on-screen buttons can be clicked; click the scene to look around again
-  if ((e.code === 'AltLeft' || e.code === 'AltRight') && !e.repeat && (S.mode === 'visit' || S.mode === 'game')) {
+  if ((e.code === 'AltLeft' || e.code === 'AltRight') && !e.repeat && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'prop')) {
     e.preventDefault(); if (locked()) { releaseLock(); toast('🖱 滑鼠已放開，可以點按鈕；點一下畫面回到視角', 2200); } else requestLock();
   }
   on.key && on.key(e);
@@ -40,12 +40,13 @@ addEventListener('blur', () => { for (const k in input.keys) input.keys[k] = fal
 let drag = null;
 cvs.addEventListener('mousedown', e => {
   if (!input.look || isTouch) return;
-  if (S.mode === 'visit' || S.mode === 'game') {
+  if (S.mode === 'visit' || S.mode === 'game' || S.mode === 'prop') {
     if (!locked()) { requestLock(); drag = { x: e.clientX, y: e.clientY }; }
     if (e.button === 0 && S.mode === 'game') { input.attack = true; on.attackDown && on.attackDown(); }
+    if (e.button === 0 && S.mode === 'prop' && locked()) on.propDown && on.propDown();
   }
 });
-addEventListener('mouseup', e => { drag = null; if (e.button === 0 && input.attack) { input.attack = false; on.attackUp && on.attackUp(); } });
+addEventListener('mouseup', e => { drag = null; if (e.button === 0 && S.mode === 'prop') on.propUp && on.propUp(); if (e.button === 0 && input.attack) { input.attack = false; on.attackUp && on.attackUp(); } });
 document.addEventListener('mousemove', e => {
   if (!input.look) return;
   if (locked()) look(e.movementX * 2.2, e.movementY * 2.2);
@@ -59,7 +60,7 @@ const joy = $('#joy'), knob = $('#joyKnob');
 let jt = null, lt = null;
 cvs.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
-    if (t.clientX < innerWidth * 0.42 && jt === null && input.look && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit')) {
+    if (t.clientX < innerWidth * 0.42 && jt === null && input.look && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit' || S.mode === 'prop')) {
       jt = { id: t.identifier, x: t.clientX, y: t.clientY }; joy.style.left = (t.clientX - 60) + 'px'; joy.style.top = (t.clientY - 60) + 'px'; joy.style.display = 'block'; knob.style.transform = 'translate(0,0)';
     } else if (lt === null && input.look) lt = { id: t.identifier, x: t.clientX, y: t.clientY };
   }
@@ -117,19 +118,20 @@ export function updatePlayer(dt, t, canMove) {
     const sy = Math.sin(player.yaw), cyw = Math.cos(player.yaw);
     const dx = (-sy * fz + cyw * fx_) * spd, dz = (-cyw * fz - sy * fx_) * spd;
     const p = player.pos;
-    if (hits(p.x, p.z, p.y)) { p.x += dx; p.z += dz; }        // already inside something: let the player walk out
+    const R = player.r;
+    if (hits(p.x, p.z, p.y, R)) { p.x += dx; p.z += dz; }        // already inside something: let the player walk out
     else {
       // small steps, each pushed out of whatever it touches, so the player glides along walls and furniture
       const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / .08));
       for (let i = 0; i < n; i++) {
-        const [nx, nz] = pushOut(p.x + dx / n, p.z + dz / n, p.y);
-        if (!hits(nx, nz, p.y, .235)) { p.x = nx; p.z = nz; }
-        else { if (!hits(p.x + dx / n, p.z, p.y)) p.x += dx / n; if (!hits(p.x, p.z + dz / n, p.y)) p.z += dz / n; }
+        const [nx, nz] = pushOut(p.x + dx / n, p.z + dz / n, p.y, R);
+        if (!hits(nx, nz, p.y, R - .005)) { p.x = nx; p.z = nz; }
+        else { if (!hits(p.x + dx / n, p.z, p.y, R)) p.x += dx / n; if (!hits(p.x, p.z + dz / n, p.y, R)) p.z += dz / n; }
       }
     }
     player.bob += dt * (run ? 14 : 10);
   }
-  if (canMove && k.Space && player.ground) { player.vy = 4.2; player.ground = false; }
+  if (canMove && k.Space && player.ground) { player.vy = player.jump; player.ground = false; }
   const g = groundAt(player.pos.x, player.pos.z, player.pos.y);
   player.vy -= 12 * dt; player.pos.y += player.vy * dt;
   if (player.pos.y <= g) { player.pos.y = g; player.vy = 0; player.ground = true; player.lastG = g; } else if (player.pos.y - g > .05) player.ground = false;

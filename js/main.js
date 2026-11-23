@@ -7,6 +7,7 @@ import { player, input, on, fx, updatePlayer, requestLock, releaseLock, locked }
 import { openPlan, closePlan, Plan } from './plan.js';
 import { startGame, stopGame, updateGame, Game, Snd, openShop, usePotion, advInteract, advHint, openPause, showDialog } from './games.js';
 import { Music } from './music.js';
+import { initProp, openLobby, updateProp, stopRound, canMove as propCanMove, pause as propPause } from './prophunt.js';
 
 // ---------- save / load ----------
 const KEY = 'home3d_design_v2';
@@ -24,6 +25,7 @@ function setMode(m, opt) {
   const prev = S.mode;
   if (prev === 'plan' && m !== 'plan') { closePlan(); S.admin = false; if (dirty) { rebuild(); renderFloorBtns(); } }
   if (prev === 'game' && m !== 'game') { stopGame(); rebuild(); }
+  if (prev === 'prop' && m !== 'prop') stopRound();
   S.mode = m;
   document.body.dataset.mode = m;
   $('#menu').classList.toggle('show', m === 'menu');
@@ -32,17 +34,18 @@ function setMode(m, opt) {
   $('#tag').style.display = (m === 'visit' || m === 'edit') ? 'block' : 'none';
   if (m !== 'edit') selectFurn(null);
   input.look = m !== 'plan' && m !== 'menu';
-  if (m === 'visit' || m === 'game') requestLock(); else releaseLock();
+  if (m === 'visit' || m === 'game' || m === 'prop') requestLock(); else releaseLock();
   if (m === 'plan') { S.admin = opt === 'admin'; Plan.fi = floorOf(player.pos.y); openPlan(); }
-  Music.setMood(m === 'game' ? 'tense' : 'calm');
+  Music.setMood(m === 'game' || m === 'prop' ? 'tense' : 'calm');
   if (m === 'game') { startGame(opt, S.data, { auto: autoCombat }); autoCombat = false; if (isTouch && innerHeight > innerWidth) setTimeout(() => toast('📱 建議把手機橫放來玩'), 2600); }
   if (m === 'menu') updateMenu();
 }
 Plan.onChange = () => { dirty = true; };
-on.escape = (to) => { if (to === 'menu' || S.mode === 'visit') setMode('menu'); else if (S.mode === 'game') openPause(); };
+on.escape = (to) => { if (to === 'menu' || S.mode === 'visit') setMode('menu'); else if (S.mode === 'game') openPause(); else if (S.mode === 'prop') propPause(); };
 const clearSave = k => { try { localStorage.removeItem('home_game_' + k); } catch (e) { } };
 document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => {
   Snd.init(); Music.start(); const [m, o] = b.dataset.go.split(':');
+  if (m === 'prop') return openLobby();
   // a game with saved progress: continue or start over
   if (m === 'game') {
     let p = null; try { p = JSON.parse(localStorage.getItem('home_game_' + o)); } catch (e) { }
@@ -76,11 +79,12 @@ function updateMenu() {
 on.key = e => {
   if (e.code === 'Escape' && (S.mode === 'edit' || S.mode === 'plan')) { if (S.mode === 'edit' && sel) { selectFurn(null); return; } if (S.mode === 'plan') return; setMode('menu'); }
   if (e.code === 'Escape' && S.mode === 'visit' && !locked()) setMode('menu');
+  if (e.code === 'Escape' && S.mode === 'prop' && !locked() && !document.querySelector('#dialog.show')) propPause();
   if (e.code === 'Escape' && S.mode === 'game' && !locked() && !document.querySelector('#dialog.show,#shop.show')) openPause();
   if (e.code === 'Tab') { if (S.mode === 'visit') setMode('edit'); else if (S.mode === 'edit') setMode('visit'); }
   if (e.code === 'KeyL' && S.mode === 'visit') setNight(!S.night);
   if (e.code === 'KeyG' && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit')) goHome();
-  if (e.code === 'KeyE' && (S.mode === 'visit' || S.mode === 'game')) interact();
+  if (e.code === 'KeyE' && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'prop')) interact();
   if (e.code === 'KeyQ' && S.mode === 'game') on.switchW && on.switchW();
   if (e.code === 'KeyH' && S.mode === 'game') usePotion();
   if (e.code === 'KeyB' && S.mode === 'game' && Game.kind === 'destroy') openShop(false);
@@ -257,18 +261,19 @@ function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
   if (S.mode === 'plan') return;
-  const canMove = S.mode === 'visit' || S.mode === 'edit' || (S.mode === 'game' && !Game.paused);
+  const canMove = S.mode === 'visit' || S.mode === 'edit' || (S.mode === 'game' && !Game.paused) || (S.mode === 'prop' && propCanMove());
   updatePlayer(dt, t, canMove && !dragging);
   updateHouse(dt, t);
-  if (S.mode === 'visit' || S.mode === 'game') updatePortals(dt);
+  if (S.mode === 'visit' || S.mode === 'game' || S.mode === 'prop') updatePortals(dt);
   // the backrooms are dangerous even while just visiting: combat switches on inside, off again once you're out
   const inBR = zoneOf(floorOf(player.pos.y))?.kind === 'backroom';
   if (S.mode === 'visit' && inBR) { autoCombat = true; setMode('game', 'adventure'); }
   else if (S.mode === 'game' && Game.auto && !inBR && !Game.paused) { setMode('visit'); toast('離開後室，回到參觀模式'); }
   updateGame(dt);
+  updateProp(dt);
   if (selBox.visible && sel) selBox.box.copy(sel.box);
   hintT -= dt;
-  if (hintT <= 0 && (S.mode === 'visit' || S.mode === 'game')) {
+  if (hintT <= 0 && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'prop')) {
     hintT = .15; const a = aim() || doorAhead(), h = $('#hint');
     // doors open by themselves when you walk into them
     const k = input.keys, moving = k.KeyW || k.ArrowUp || Math.abs(input.jy) > .3;
@@ -283,6 +288,7 @@ function loop() {
   }
   renderer.render(scene, camera);
 }
+initProp({ setMode, goHome });
 renderFloorBtns();
 document.body.classList.toggle('touch', isTouch);
 setMode('menu');
