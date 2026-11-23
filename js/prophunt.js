@@ -18,8 +18,8 @@ let DASHES = 3;
 const HELP = `<b>玩法</b><br>開始時隨機一個人當 <b>👹 鬼</b>，其他人是 <b>🧍 躲藏者</b>。所有人都縮小了，家變得超大。<br><br>
 <b>🧍 躲藏者</b>：鬼出發前先躲好。隨時可以用下方圖示變身成家具、地板或牆壁（R 旋轉）。🎯 會變成你正在看的那件家具。下方可以切換家具種類。💨 加速可以跑快 ${BOOST_T} 秒（次數由房主設定），🌫 噴霧每局只能用 1 次：噴在鬼附近（${SPRAY_R} 公尺內），鬼會 ${SPRAY_T} 秒看不清楚。被鬼打到血快沒了（剩 ${CAUGHT_HP}）就算被抓。每 ${TAUNT_EVERY} 秒所有躲藏者會發出一聲笑聲。<br><br>
 <b>👹 鬼</b>：躲藏時間內眼睛被矇住。之後用 🔫 槍或 🔪 刀找人（Q 切換），按住就能一直攻擊、不會扣血。打中躲藏者會噴出一點血。<br><br>
-<b>勝負</b>：時間內抓到所有人鬼贏，撐到時間結束躲藏者贏。<br><br>
-<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 加速 ${BOOST_T} 秒、V 🌫 噴霧、空白鍵跳、1–9 變身、R 旋轉、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
+<b>🔒 鎖定模式</b>（躲藏者）：家具固定不動，鏡頭可以繞著自己轉、滾輪或兩指縮放，看清楚四周。畫面只剩鎖定、😄 笑聲（挑釁鬼）和血條。再按一次鎖定回到正常。<br><br><b>勝負</b>：時間內抓到所有人鬼贏，撐到時間結束躲藏者贏。<br><br>
+<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 加速 ${BOOST_T} 秒、V 🌫 噴霧、空白鍵跳、1–9 變身、R 旋轉、L 🔒 鎖定、T 😄 笑聲、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
 
 const P = {
   peer: null, host: false, conns: {}, hostConn: null, myId: null, code: '', name: '',
@@ -27,6 +27,7 @@ const P = {
   phase: 'off', left: 0, role: 'hider', seeker: null, caught: new Set(), states: {},
   hp: 100, dash: 3, spray: 1, blindT: 0, boostT: 0, base: null, cat: '常用', slot: 'me', form: { k: 'me' }, frot: 0, anchor: null,
   weapon: 'gun', cd: 0, holding: false, remotes: {}, self: null, ownData: null, hooks: {}, stT: 0, relayT: 0, doorT: 0, tauntT: TAUNT_EVERY, doors: [], quick: [],
+  lock: false, lockYaw: 0, lockMesh: null, zoom: 2.6, laughCD: 0,
 };
 export const Prop = P;
 const send = m => { if (P.host) hostRecv(P.myId, m); else if (P.hostConn?.open) P.hostConn.send(m); };
@@ -117,6 +118,7 @@ function hostRecv(from, m, conn) {
   if (m.t === 'hit') { if (P.phase === 'seek' && from === P.seeker && !P.caught.has(m.to)) sendTo(m.to, { t: 'hurt', dmg: m.dmg, by: from }); return; }
   if (m.t === 'caught') { if (P.caught.has(from) || from === P.seeker) return; P.caught.add(from); bcast({ t: 'caught', id: from }); checkAllCaught(); return; }
   if (m.t === 'door' || m.t === 'fx') { bcast(m, from); return; }
+  if (m.t === 'laugh') { if (P.phase === 'seek' || P.phase === 'hide') bcast({ t: 'laugh', by: from }); return; }
   if (m.t === 'spray') { if (P.phase === 'seek' || P.phase === 'hide') bcast({ ...m, by: from }); return; }
 }
 function checkAllCaught() {
@@ -139,7 +141,7 @@ setInterval(() => { const n = performance.now(), dt = Math.min(.5, (n - lastTick
 function sendMine(dt) {
   P.stT -= dt;
   if (P.stT <= 0) {
-    P.stT = 1 / 12; const s = { x: +player.pos.x.toFixed(3), y: +player.pos.y.toFixed(3), z: +player.pos.z.toFixed(3), yaw: +player.yaw.toFixed(3), f: formKey(P.form), fr: +P.frot.toFixed(2), hp: Math.round(P.hp) };
+    P.stT = 1 / 12; const s = { x: +player.pos.x.toFixed(3), y: +player.pos.y.toFixed(3), z: +player.pos.z.toFixed(3), yaw: +(P.lock ? P.lockYaw : player.yaw).toFixed(3), f: formKey(P.form), fr: +P.frot.toFixed(2), hp: Math.round(P.hp) };
     if (P.form.k === 'wall') s.w = P.wallAt.map(v => +v.toFixed(3));
     send({ t: 'st', s });
   }
@@ -169,7 +171,7 @@ function clientRecv(m) {
       updateHud(); break;
     case 'hurt': hurt(m.dmg); break;
     case 'caught': P.caught.add(m.id);
-      if (m.id === P.myId) { P.role = 'spec'; setForm({ k: 'me' }); bigText('😵 你被抓到了', '可以四處看看大家躲在哪', 2600); }
+      if (m.id === P.myId) { setLock(false); P.role = 'spec'; setForm({ k: 'me' }); bigText('😵 你被抓到了', '可以四處看看大家躲在哪', 2600); }
       else { toast(`🎯 ${nameOf(m.id)} 被抓到了！`); if (P.role === 'seeker') { Snd.coin(); } }
       updateHud(); break;
     case 'end': showEnd(m); break;
@@ -178,6 +180,7 @@ function clientRecv(m) {
     case 'fx': playFx(m); break;
     case 'taunt': taunt(); break;
     case 'spray': sprayFx(m); break;
+    case 'laugh': laughFx(m.by); break;
   }
 }
 
@@ -205,6 +208,7 @@ function startRound(m) {
   Snd.init(); Snd.bell();
 }
 export function stopRound() {
+  setLock(false);
   P.holding = false;
   for (const id in P.remotes) scene.remove(P.remotes[id].g); P.remotes = {};
   if (P.self) { scene.remove(P.self); P.self = null; }
@@ -388,13 +392,47 @@ function sprayFx(m) {
 function taunt() {
   Snd.init();
   if (P.role === 'hider') { Snd.giggle(0, .07); toast('😄 你發出了笑聲…', 1000); }
-  for (const r of Object.values(P.remotes)) {
-    if (!r.alive || r.id === P.seeker) continue;
-    const dx = r.g.position.x - player.pos.x, dz = r.g.position.z - player.pos.z, d = Math.hypot(dx, dz) + Math.abs(r.g.position.y - player.pos.y) * 2;
-    const v = .3 * clamp(1 - d / 20, 0, 1); if (v < .02) continue;
-    const ang = Math.atan2(dx, -dz) + player.yaw; Snd.giggle(clamp(Math.sin(ang), -1, 1), v);
-  }
+  for (const r of Object.values(P.remotes)) if (r.alive && r.id !== P.seeker) giggleFrom(r, .3, 20);
 }
+// a giggle that sounds like it comes from where that player is
+function giggleFrom(r, vol, range) {
+  const dx = r.g.position.x - player.pos.x, dz = r.g.position.z - player.pos.z, d = Math.hypot(dx, dz) + Math.abs(r.g.position.y - player.pos.y) * 2;
+  const v = vol * clamp(1 - d / range, 0, 1); if (v < .02) return;
+  const ang = Math.atan2(dx, -dz) + player.yaw; Snd.giggle(clamp(Math.sin(ang), -1, 1), v);
+}
+// 😄 a hider laughs on purpose to tease the seeker (everyone hears it from that spot)
+function laugh() {
+  if (S.mode !== 'prop' || P.role !== 'hider' || P.phase === 'end' || P.laughCD > 0) return;
+  P.laughCD = 2.5; send({ t: 'laugh' });
+}
+function laughFx(id) {
+  Snd.init();
+  if (id === P.myId) { Snd.giggle(0, .12); toast('😄 哈哈哈～鬼聽得到你在哪', 1000); return; }
+  const r = P.remotes[id]; if (r && r.alive) { giggleFrom(r, .45, 26); setTimeout(() => P.remotes[id] && giggleFrom(P.remotes[id], .3, 26), 260); }
+}
+// 🔒 lock mode: the disguise stays put and the camera orbits around it (drag to turn, wheel / pinch to zoom)
+function setLock(on) {
+  if (on && (S.mode !== 'prop' || P.role !== 'hider' || P.phase === 'end')) return;
+  if (!on && !P.lock) return;
+  P.lock = !!on; document.body.classList.toggle('phlock', P.lock); input.noJoy = P.lock; input.jx = input.jy = 0; pinch = null;
+  if (P.lock) {
+    P.lockYaw = player.yaw; P.zoom = P.form.k === 'f' ? 2.6 : 2;
+    if (!P.self) { P.lockMesh = formMesh({ k: 'me' }, colorOf(P.myId)); scene.add(P.lockMesh); }
+    toast(isTouch ? '🔒 鎖定：滑動轉視角、兩指縮放' : '🔒 鎖定：移動滑鼠轉視角、滾輪縮放，L 解除', 2200);
+  } else {
+    if (P.lockMesh) { scene.remove(P.lockMesh); P.lockMesh = null; }
+    if (P.form.k === 'f') P.frot += P.lockYaw - player.yaw; // keep the furniture facing the same way
+  }
+  updateHud();
+}
+let pinch = null;
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!P.lock || S.mode !== 'prop' || e.touches.length !== 2) return;
+  const [a, b] = e.touches, d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  if (!pinch) pinch = { d, z: P.zoom, yaw: player.yaw, pitch: player.pitch }; else P.zoom = clamp(pinch.z * pinch.d / Math.max(20, d), .8, 7);
+}, { passive: true });
+renderer.domElement.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+addEventListener('wheel', e => { if (P.lock && S.mode === 'prop') P.zoom = clamp(P.zoom * (e.deltaY > 0 ? 1.12 : 1 / 1.12), .8, 7); }, { passive: true });
 
 // ---------------- HUD & lobby UI ----------------
 const CSS = `
@@ -412,14 +450,17 @@ const CSS = `
 #phRole{position:absolute;left:10px;top:calc(8px + var(--sat));background:rgba(0,0,0,.6);padding:6px 10px;border-radius:10px;font-size:13px;line-height:1.5}
 #phMenu{position:absolute;right:10px;top:calc(8px + var(--sat))}
 #phBottom{position:absolute;left:50%;bottom:calc(10px + var(--sab));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;max-width:calc(100vw - 20px)}
-#phStat{display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.55);padding:5px 10px;border-radius:10px;font-size:13px}
-#phHp{width:150px;height:10px;background:rgba(255,255,255,.15);border-radius:5px;overflow:hidden} #phHp i{display:block;height:100%;background:linear-gradient(90deg,#3c3,#9e4);width:100%}
+#phStat{display:flex;gap:7px;align-items:center;background:rgba(0,0,0,.5);padding:3px 7px;border-radius:9px;font-size:11px}
+#phStat button{font-size:11px;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,.12);white-space:nowrap} #phStat kbd{font-size:9px;opacity:.6;margin-left:2px}
+body.touch #phStat kbd{display:none}
+#phHp{width:72px;height:6px;background:rgba(255,255,255,.15);border-radius:3px;overflow:hidden} #phHp i{display:block;height:100%;background:linear-gradient(90deg,#3c3,#9e4);width:100%}
 #phForms,#phWeap{display:flex;gap:5px;overflow-x:auto;max-width:100%;padding:2px}
 #phCats{display:flex;gap:4px;overflow-x:auto;max-width:100%;padding:1px 2px}
-#phCats button{flex:none;font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(20,24,30,.8)} #phCats button.on{background:#ffb020;color:#111}
+#phCats button{flex:none;font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(20,24,30,.8)} #phCats button.on{background:#ffb020;color:#111}
 #phForms button,#phWeap button{flex:none;width:58px;height:58px;padding:2px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px;background:rgba(20,24,30,.85);line-height:1.1}
+#phForms{gap:3px} #phForms button{width:30px;height:30px;padding:1px;font-size:14px;border-radius:7px} #phForms button small{display:none}
 #phForms button small,#phWeap button small{font-size:10px;color:#ddd;max-width:54px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-#phForms button img{width:36px;height:36px} #phForms button.on,#phWeap button.on{background:var(--acc)}
+#phForms button img{width:24px;height:24px} #phForms button.on,#phWeap button.on{background:var(--acc)}
 #phForms button i{position:absolute;margin:-40px 0 0 -40px;font-size:9px;font-style:normal;color:#aaa}
 #phTouch{position:absolute;right:12px;bottom:calc(84px + var(--sab));display:none;flex-direction:column;gap:10px;align-items:flex-end}
 body.touch #phTouch{display:flex}
@@ -431,18 +472,22 @@ body.touch #phTouch{display:flex}
 #phHit.on{animation:phh .25s} @keyframes phh{0%{opacity:1;transform:scale(.6)}100%{opacity:0;transform:scale(1.4)}}
 body[data-mode=prop] #cross{display:block} body[data-mode=prop] #flname{display:block}
 body.touch #phBottom{left:auto;right:auto;left:50%}
-@media (max-width:760px){#phForms button,#phWeap button{width:50px;height:50px} #phForms button img{width:30px;height:30px} #phTop{font-size:13px}}
+@media (max-width:760px){#phWeap button{width:50px;height:50px} #phForms button{width:28px;height:28px} #phForms button img{width:22px;height:22px} #phTop{font-size:13px}}
+body.phlock #phTop,body.phlock #phRole,body.phlock #phMenu,body.phlock #phCats,body.phlock #phForms,body.phlock #phTouch,body.phlock #cross,body.phlock #hint,body.phlock #flname,body.phlock #joy,body.phlock #topr,body.phlock #phFog{display:none!important}
+body.phlock #phStat{font-size:13px;padding:5px 9px;gap:9px} body.phlock #phStat button{font-size:13px;padding:5px 11px}
 `;
 function ensureDom() {
   if ($('#phLobby')) return;
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const d = document.createElement('div'); d.innerHTML = `<div id="phLobby"></div>
   <div id="phHud"><div id="phTop"></div><div id="phRole"></div><button id="phMenu">☰</button>
-    <div id="phBottom"><div id="phStat"></div><div id="phCats"></div><div id="phForms"></div><div id="phWeap"></div></div>
+    <div id="phBottom"><div id="phStat"><button id="phLockB"></button><span id="phStatT"></span><button id="phLaughB">😄<kbd>T</kbd></button></div><div id="phCats"></div><div id="phForms"></div><div id="phWeap"></div></div>
     <div id="phTouch"><button data-pt="jump">⤒</button><button data-pt="spray">🌫</button><button data-pt="dash">💨</button><button data-pt="sw">🔄</button><button data-pt="atk" class="big">🔫</button></div></div>
   <div id="phBlind"><b>👹</b><div>你是鬼，眼睛先矇住</div><div id="phBlindT" style="font-size:40px;margin-top:10px"></div></div><div id="phHit"></div><div id="phFog"></div>`;
   while (d.firstChild) document.body.appendChild(d.firstChild);
   $('#phMenu').onclick = e => { e.stopPropagation(); pause(); };
+  $('#phLockB').onclick = e => { e.stopPropagation(); setLock(!P.lock); };
+  $('#phLaughB').onclick = e => { e.stopPropagation(); laugh(); };
   document.querySelectorAll('#phTouch [data-pt]').forEach(b => {
     const a = b.dataset.pt;
     b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (a === 'atk') { P.holding = true; fire(); } if (a === 'jump') input.keys.Space = true; if (a === 'dash') dash(); if (a === 'spray') spray(); if (a === 'sw') switchW(); }, { passive: false });
@@ -486,7 +531,9 @@ function updateHud() {
   $('#phRole').innerHTML = (P.role === 'seeker' ? '👹 你是<b>鬼</b>' : P.role === 'spec' ? '😵 已被抓（觀戰）' : '🧍 你是<b>躲藏者</b>') + `<br><span class="mut">鬼：</span><span style="color:${colorOf(P.seeker)}">${nameOf(P.seeker)}</span>`;
   const show = P.role === 'hider';
   $('#phStat').style.display = show ? 'flex' : 'none';
-  $('#phStat').innerHTML = `❤️ <div id="phHp"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}　💨 ${P.boostT > 0 ? `<b style="color:#7cf">${P.boostT.toFixed(1)}s</b> ` : ''}${'●'.repeat(P.dash)}${'○'.repeat(Math.max(0, DASHES - P.dash))}　<span style="opacity:${P.spray ? 1 : .35}">🌫 ${P.spray}</span>`;
+  $('#phLockB').innerHTML = P.lock ? '🔓 解除<kbd>L</kbd>' : '🔒 鎖定<kbd>L</kbd>';
+  $('#phLaughB').style.opacity = P.laughCD > 0 ? .4 : 1;
+  $('#phStatT').innerHTML = `❤️ <div id="phHp" style="display:inline-block;vertical-align:middle"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}` + (P.lock ? '' : `　💨 ${P.boostT > 0 ? `<b style="color:#7cf">${P.boostT.toFixed(1)}s</b> ` : ''}${'●'.repeat(P.dash)}${'○'.repeat(Math.max(0, DASHES - P.dash))}　<span style="opacity:${P.spray ? 1 : .35}">🌫 ${P.spray}</span>`);
   $('#phWeap').querySelectorAll('[data-w]').forEach(b => b.classList.toggle('on', b.dataset.w === P.weapon));
   $('#phTouch [data-pt=atk]').textContent = WEAP[P.weapon].ic;
   $('#phTouch [data-pt=spray]').style.opacity = P.spray ? 1 : .35;
@@ -559,6 +606,9 @@ on.propDown = () => { if (P.role === 'seeker') { P.holding = true; fire(); } };
 on.propUp = () => { P.holding = false; };
 addEventListener('keydown', e => {
   if (S.mode !== 'prop' || e.repeat || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.code === 'KeyL') setLock(!P.lock);
+  if (e.code === 'KeyT') laugh();
+  if (P.lock) return;
   if (e.code === 'KeyF') dash();
   if (e.code === 'KeyV') spray();
   if (e.code === 'KeyQ') switchW();
@@ -567,7 +617,7 @@ addEventListener('keydown', e => {
 });
 
 // ---------------- per frame ----------------
-export function canMove() { return S.mode === 'prop' && !(P.role === 'seeker' && P.phase === 'hide') && P.form.k !== 'wall' && !$('#dialog').classList.contains('show'); }
+export function canMove() { return S.mode === 'prop' && !(P.role === 'seeker' && P.phase === 'hide') && P.form.k !== 'wall' && !P.lock && !$('#dialog').classList.contains('show'); }
 const camBack = new THREE.Vector3();
 export function updateProp(dt) {
   for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.t -= dt; s.m.material.opacity = s.t / (s.T || .3); if (s.v) { if (s.drag) s.v.multiplyScalar(Math.max(0, 1 - dt * 2.2)); else s.v.y -= 6 * dt; s.m.position.addScaledVector(s.v, dt); } if (s.grow) s.m.scale.multiplyScalar(1 + s.grow * dt); if (s.t <= 0) { scene.remove(s.m); sparks.splice(i, 1); } }
@@ -578,12 +628,16 @@ export function updateProp(dt) {
   // 💨 boost: run faster for a few seconds
   if (P.base) { if (P.boostT > 0) P.boostT = Math.max(0, P.boostT - dt); const m = P.boostT > 0 ? BOOST_X : 1; player.speed = P.base.speed * m; player.run = P.base.run * m; }
   // own disguise follows you; disguised hiders get a camera behind them so they can see what they look like
-  if (P.self) {
-    if (P.form.k === 'wall' && P.wallAt) { P.self.position.set(P.wallAt[0], P.wallAt[1], P.wallAt[2]); P.self.rotation.y = P.wallAt[3]; }
-    else { P.self.position.copy(player.pos); P.self.rotation.y = player.yaw + (P.form.k === 'f' ? P.frot : 0); }
-    const head = V.set(player.pos.x, player.pos.y + .55, player.pos.z);
+  if (P.laughCD > 0) P.laughCD -= dt;
+  if (pinch) { player.yaw = pinch.yaw; player.pitch = pinch.pitch; } // pinching zooms, it shouldn't also spin the view
+  const me = P.self || P.lockMesh;
+  if (me) {
+    const yaw = P.lock ? P.lockYaw : player.yaw;
+    if (P.form.k === 'wall' && P.wallAt) { me.position.set(P.wallAt[0], P.wallAt[1], P.wallAt[2]); me.rotation.y = P.wallAt[3]; }
+    else { me.position.copy(player.pos); me.rotation.y = yaw + (P.form.k === 'f' ? P.frot : 0); }
+    const head = V.set(player.pos.x, player.pos.y + (P.lock ? .4 : .55), player.pos.z);
     camBack.set(Math.sin(player.yaw) * Math.cos(player.pitch), -Math.sin(player.pitch), Math.cos(player.yaw) * Math.cos(player.pitch));
-    let dist = P.form.k === 'f' ? 1.9 : 1.3; ray.set(head, camBack); ray.far = dist; const h = ray.intersectObjects([...H.wallMeshes, ...H.slabMeshes], false)[0]; if (h) dist = Math.max(.15, h.distance - .12);
+    let dist = P.lock ? P.zoom : P.form.k === 'f' ? 1.9 : 1.3; ray.set(head, camBack); ray.far = dist; const h = ray.intersectObjects([...H.wallMeshes, ...H.slabMeshes], false)[0]; if (h) dist = Math.max(.15, h.distance - .12);
     camera.position.copy(head).addScaledVector(camBack, dist);
   }
   vm.visible = P.role === 'seeker' && P.phase !== 'end';

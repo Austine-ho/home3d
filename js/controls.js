@@ -60,7 +60,7 @@ const joy = $('#joy'), knob = $('#joyKnob');
 let jt = null, lt = null;
 cvs.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
-    if (t.clientX < innerWidth * 0.42 && jt === null && input.look && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit' || S.mode === 'prop')) {
+    if (t.clientX < innerWidth * 0.42 && jt === null && input.look && !input.noJoy && (S.mode === 'visit' || S.mode === 'game' || S.mode === 'edit' || S.mode === 'prop')) {
       jt = { id: t.identifier, x: t.clientX, y: t.clientY }; joy.style.left = (t.clientX - 60) + 'px'; joy.style.top = (t.clientY - 60) + 'px'; joy.style.display = 'block'; knob.style.transform = 'translate(0,0)';
     } else if (lt === null && input.look) lt = { id: t.identifier, x: t.clientX, y: t.clientY };
   }

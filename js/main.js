@@ -136,6 +136,8 @@ let portalCD = 0, portalArmed = true;
 function usePortal(p) {
   if (!p.to) return toast('這個傳送門還沒有設定目的地');
   const fi = entFi(p.to); if (fi < 0 || !allFl()[fi]) return toast('目的地不存在了');
+  // prop hunt stays in the house: the backrooms would make the hiding area far too big
+  if (S.mode === 'prop' && (p.admin || allFl()[fi].kind === 'backroom' || allFl()[fi].admin)) { portalArmed = false; portalCD = 1; return toast('🚫 躲貓貓時不能進入後室'); }
   const f = $('#flash'); f.style.background = autoPortal(p) ? 'rgba(160,110,255,.7)' : 'rgba(0,0,0,.85)'; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 250);
   Snd.init(); if (autoPortal(p)) { Snd.tone(300, .5, 'sine', .2, 1200); Snd.tone(450, .5, 'triangle', .1, 1500, .1); } else Snd.tone(160, .15, 'square', .08);
   player.pos.set(p.to.x, floorY(fi) + .05, -p.to.d); player.vy = 0; portalCD = 1.2; portalArmed = false;
