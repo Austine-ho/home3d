@@ -399,9 +399,17 @@ function splitWall(w) {
 }
 function showCatalog() {
   const groups = {}; for (const id in CAT) (groups[CAT[id].grp] || (groups[CAT[id].grp] = [])).push(id);
-  $('#pprops').innerHTML = `<div class="ph">加家具 <small>點一下放到畫面中央</small></div>` + Object.entries(groups).map(([g, ids]) => `<div class="grp">${g}</div><div class="grid">${ids.map(id => `<button data-add="${id}">${CAT[id].n}</button>`).join('')}</div>`).join('');
-  $('#pprops').classList.add('show');
-  $('#pprops').querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
+  const el = $('#pprops'), names = Object.keys(groups);
+  el.innerHTML = `<div class="ph">加家具 <small>點一下放到畫面中央（共 ${Object.keys(CAT).length} 種）</small></div>
+    <input id="catQ" placeholder="🔍 搜尋家具，例如 沙發、杯、燈" style="width:100%;box-sizing:border-box;margin:4px 0 6px;padding:7px 9px;border-radius:8px;border:1px solid #556;background:#1a1e26;color:#fff">
+    <div class="catchips">${['全部', ...names].map((g, i) => `<button data-cg="${g}" class="${i ? '' : 'on'}">${g}</button>`).join('')}</div>
+    <div id="catList">${Object.entries(groups).map(([g, ids]) => `<div class="catg" data-g="${g}"><div class="grp">${g}</div><div class="grid">${ids.map(id => `<button data-add="${id}">${CAT[id].n}</button>`).join('')}</div></div>`).join('')}</div>`;
+  let cg = '全部';
+  const filt = () => { const q = $('#catQ').value.trim(); el.querySelectorAll('.catg').forEach(gd => { let any = 0; gd.querySelectorAll('[data-add]').forEach(b => { const ok = !q || b.textContent.includes(q); b.style.display = ok ? '' : 'none'; any += ok; }); gd.style.display = any && (q || cg === '全部' || gd.dataset.g === cg) ? '' : 'none'; }); };
+  $('#catQ').oninput = filt;
+  el.querySelectorAll('[data-cg]').forEach(b => b.onclick = () => { cg = b.dataset.cg; el.querySelectorAll('[data-cg]').forEach(x => x.classList.toggle('on', x === b)); filt(); });
+  el.classList.add('show');
+  el.querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
     const r = cvs.getBoundingClientRect(), [x, d] = toP(r.width / 2, r.height / 2), type = b.dataset.add;
     const fu = { type, x: snapV(x), d: snapV(d), rot: 0, y: CAT[type].y || 0, ...adm() }; fl().furniture.push(fu); P.sel = { k: 'furn', o: fu }; P.tool = 'select'; buildToolbar(); commit(); toast(`已加入${CAT[type].n}，拖曳到想要的位置`);
   });

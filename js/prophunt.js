@@ -2,7 +2,7 @@
 // Phones/computers connect directly to each other (WebRTC through PeerJS; its public broker only introduces the
 // devices, game traffic goes device-to-device). The device that creates the room runs the round and relays states.
 import { THREE, S, $, scene, camera, renderer, isTouch, toast, clamp } from './core.js';
-import { CAT, buildFurniture } from './catalog.js';
+import { CAT, buildFurniture, footprint } from './catalog.js';
 import { H, BODY, build, pushOut } from './house.js';
 import { player, input, on, fx, releaseLock, locked } from './controls.js';
 import { Snd, showDialog } from './games.js';
@@ -13,18 +13,19 @@ const COLORS = ['#4aa3ff', '#ffb020', '#5ad16a', '#ff6ad5', '#9a7bff', '#2fd6d0'
 const SMALL = { eye: .5, r: .11, lo: .2, hi: .62, speed: 2.4, run: 3.5, jump: 3.3 };
 const NORMAL = { eye: 1.58, r: .24, lo: .36, hi: 1.7, speed: 4.4, run: 6.2, jump: 4.2 };
 const WEAP = { gun: { n: '槍', ic: '🔫', dmg: 14, cd: .38, range: 30 }, knife: { n: '刀', ic: '🔪', dmg: 34, cd: .6, range: 1.5 } };
-const CAUGHT_HP = 15, MISS_COST = 4, DASHES = 3, TAUNT_EVERY = 30;
+const CAUGHT_HP = 15, TAUNT_EVERY = 30, BOOST_T = 3, BOOST_X = 1.8, HIDER_X = 1.1;
+let DASHES = 3;
 const HELP = `<b>玩法</b><br>開始時隨機一個人當 <b>👹 鬼</b>，其他人是 <b>🧍 躲藏者</b>。所有人都縮小了，家變得超大。<br><br>
-<b>🧍 躲藏者</b>：鬼出發前先躲好。隨時可以用下方圖示變身成家具、地板或牆壁（R 旋轉）。🎯 會變成你正在看的那件家具。被鬼打到血快沒了（剩 ${CAUGHT_HP}）就算被抓。每 ${TAUNT_EVERY} 秒所有躲藏者會發出一聲笑聲。<br><br>
-<b>👹 鬼</b>：躲藏時間內眼睛被矇住。之後用 🔫 槍或 🔪 刀找人（Q 切換），打錯家具會扣自己 ${MISS_COST} 血，血用完鬼就輸了。<br><br>
+<b>🧍 躲藏者</b>：鬼出發前先躲好。隨時可以用下方圖示變身成家具、地板或牆壁（R 旋轉）。🎯 會變成你正在看的那件家具。下方可以切換家具種類。💨 加速可以跑快 ${BOOST_T} 秒（次數由房主設定），平常也比鬼快一點。被鬼打到血快沒了（剩 ${CAUGHT_HP}）就算被抓。每 ${TAUNT_EVERY} 秒所有躲藏者會發出一聲笑聲。<br><br>
+<b>👹 鬼</b>：躲藏時間內眼睛被矇住。之後用 🔫 槍或 🔪 刀找人（Q 切換），按住就能一直攻擊、不會扣血。打中躲藏者會噴出一點血。<br><br>
 <b>勝負</b>：時間內抓到所有人鬼贏，撐到時間結束躲藏者贏。<br><br>
-<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 衝刺（每人 ${DASHES} 次）、空白鍵跳、1–9 變身、R 旋轉、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
+<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 加速 ${BOOST_T} 秒、空白鍵跳、1–9 變身、R 旋轉、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
 
 const P = {
   peer: null, host: false, conns: {}, hostConn: null, myId: null, code: '', name: '',
-  players: [], settings: { hide: 30, seek: 240 }, view: 'home',
+  players: [], settings: { hide: 30, seek: 240, dashes: 3 }, view: 'home',
   phase: 'off', left: 0, role: 'hider', seeker: null, caught: new Set(), states: {},
-  hp: 100, dash: DASHES, dashT: 0, dashDir: new THREE.Vector3(), form: { k: 'me' }, frot: 0, anchor: null,
+  hp: 100, dash: 3, boostT: 0, base: null, cat: '常用', slot: 'me', form: { k: 'me' }, frot: 0, anchor: null,
   weapon: 'gun', cd: 0, holding: false, remotes: {}, self: null, ownData: null, hooks: {}, stT: 0, relayT: 0, doorT: 0, tauntT: TAUNT_EVERY, doors: [], quick: [],
 };
 export const Prop = P;
@@ -115,7 +116,6 @@ function hostRecv(from, m, conn) {
   if (m.t === 'st') { P.states[from] = m.s; return; }
   if (m.t === 'hit') { if (P.phase === 'seek' && from === P.seeker && !P.caught.has(m.to)) sendTo(m.to, { t: 'hurt', dmg: m.dmg, by: from }); return; }
   if (m.t === 'caught') { if (P.caught.has(from) || from === P.seeker) return; P.caught.add(from); bcast({ t: 'caught', id: from }); checkAllCaught(); return; }
-  if (m.t === 'seekerDown') { if (from === P.seeker && P.phase === 'seek') endRound('hiders', '鬼打錯太多次，血用完了'); return; }
   if (m.t === 'door' || m.t === 'fx') { bcast(m, from); return; }
 }
 function checkAllCaught() {
@@ -127,7 +127,7 @@ function startRoundHost() {
   if (P.players.length < 2) return toast('至少要 2 個人才能開始');
   const seeker = P.players[Math.floor(Math.random() * P.players.length)].id;
   P.caught = new Set(); P.states = {};
-  bcast({ t: 'start', data: S.data, seeker, players: P.players, hide: P.settings.hide, seek: P.settings.seek });
+  bcast({ t: 'start', data: S.data, seeker, players: P.players, hide: P.settings.hide, seek: P.settings.seek, dashes: P.settings.dashes || 3 });
 }
 function endRound(win, why) { if (P.phase === 'end') return; bcast({ t: 'end', win, why, seeker: P.seeker, caught: [...P.caught] }); }
 function setLeft(s) { P.endAt = performance.now() + s * 1000; }
@@ -189,11 +189,14 @@ function startRound(m) {
   S.data = JSON.parse(JSON.stringify(m.data)); build(S.data);
   P.players = m.players; P.seeker = m.seeker; P.caught = new Set(); P.states = {};
   P.role = m.seeker === P.myId ? 'seeker' : 'hider';
-  P.hp = 100; P.dash = DASHES; P.dashT = 0; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;
+  DASHES = m.dashes || 3; P.hp = 100; P.dash = DASHES; P.boostT = 0; P.cat = '常用'; P.slot = 'me'; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;
   P.phase = 'hide'; setLeft(m.hide); P.doors = H.doors.map(d => d.open);
   for (const id in P.remotes) scene.remove(P.remotes[id].g); P.remotes = {};
   P.hooks.setMode('prop');
   applySize(SMALL); camera.fov = 80; camera.updateProjectionMatrix();
+  // hiders walk a little faster than the seeker
+  if (P.role === 'hider') { player.speed *= HIDER_X; player.run *= HIDER_X; }
+  P.base = { speed: player.speed, run: player.run };
   P.hooks.goHome();
   const i = P.players.findIndex(p => p.id === P.myId); player.pos.x += ((i % 4) - 1.5) * .35; player.pos.z += Math.floor(i / 4) * .35;
   P.quick = pickQuick(); buildHud(); setForm({ k: 'me' }); updateHud();
@@ -259,7 +262,7 @@ function setForm(f) {
   P.self = f.k === 'me' ? null : formMesh(f, colorOf(P.myId)); if (P.self) scene.add(P.self);
   document.querySelectorAll('#phForms [data-fm]').forEach(b => b.classList.toggle('on', b.dataset.fm === formSlot(f)));
 }
-const formSlot = f => f.k === 'f' ? (P.quick.includes(f.type) ? 'q:' + f.type : 'copy') : f.k;
+const formSlot = f => f.k === 'f' ? P.slot : f.k;
 function aimHit(far, objs) { ray.setFromCamera({ x: 0, y: 0 }, camera); ray.far = far; return ray.intersectObjects(objs, true)[0]; }
 function chooseForm(slot) {
   if (P.role !== 'hider' || P.phase === 'end') return;
@@ -267,7 +270,7 @@ function chooseForm(slot) {
   if (slot === 'copy') {
     const h = aimHit(4, H.furn.map(e => e.obj)); const e = h?.object; let fe = null; for (let o = e; o && !fe; o = o.parent) fe = o.userData?.furn;
     if (!fe) return toast('🎯 對準一件家具再按（4 公尺內）');
-    P.frot = fe.obj.rotation.y - player.yaw; toast('🎯 變成 ' + CAT[fe.f.type].n, 1200); return setForm({ k: 'f', type: fe.f.type, color: fe.f.color });
+    P.frot = fe.obj.rotation.y - player.yaw; P.slot = 'copy'; toast('🎯 變成 ' + CAT[fe.f.type].n, 1200); return setForm({ k: 'f', type: fe.f.type, color: fe.f.color });
   }
   if (slot === 'floor') {
     ray.set(V.set(player.pos.x, player.pos.y + .4, player.pos.z), V2.set(0, -1, 0)); ray.far = 1.2;
@@ -284,7 +287,7 @@ function chooseForm(slot) {
     P.wallAt = [h.point.x + n.x * .02, player.pos.y, h.point.z + n.z * .02, Math.atan2(n.x, n.z)];
     return setForm({ k: 'wall', key });
   }
-  if (slot.startsWith('q:')) { P.frot = 0; return setForm({ k: 'f', type: slot.slice(2) }); }
+  if (slot.startsWith('q:')) { P.frot = 0; P.slot = slot; return setForm({ k: 'f', type: slot.slice(2) }); }
 }
 
 // ---------------- thumbnails for the quick bar ----------------
@@ -322,16 +325,19 @@ function fire() {
   send({ t: 'fx', k: P.weapon, p: [camera.position.x, camera.position.y, camera.position.z] });
   if (!h) return;
   let rid = null, fe = null; for (let o = h.object; o; o = o.parent) { if (o.userData?.rid) rid = o.userData.rid; if (o.userData?.furn) fe = o.userData.furn; }
-  spark(h.point, rid ? '#ff3a2a' : '#ffd24a');
-  if (rid) { send({ t: 'hit', to: rid, dmg: w.dmg }); Snd.hit(); hitMark(); }
-  else if (fe && P.weapon === 'gun') {
-    P.hp = Math.max(0, P.hp - MISS_COST); toast(`❌ 打錯了，那是真的家具 −${MISS_COST}`, 1000); Snd.hurt();
-    if (P.hp <= 0) send({ t: 'seekerDown' });
-    updateHud();
+  if (rid) { send({ t: 'hit', to: rid, dmg: w.dmg }); blood(h.point); Snd.tone(120, .06, 'sine', .08, 60); }
+  else if (P.weapon === 'gun') spark(h.point, '#ffd24a');
+}
+// a small spray of blood where a hider was hit: just enough for the seeker to notice
+function blood(p) {
+  for (let i = 0; i < 7; i++) {
+    const m = new THREE.Mesh(BLOOD_G, new THREE.MeshBasicMaterial({ color: i % 2 ? '#a00d0d' : '#d01818', transparent: true }));
+    m.position.copy(p); m.scale.setScalar(.6 + Math.random() * .8); scene.add(m);
+    sparks.push({ m, t: .45, T: .45, v: new THREE.Vector3((Math.random() - .5) * 1.4, .4 + Math.random() * 1.1, (Math.random() - .5) * 1.4) });
   }
 }
 function hitMark() { const c = $('#phHit'); c.classList.remove('on'); void c.offsetWidth; c.classList.add('on'); }
-const sparks = [];
+const sparks = [], BLOOD_G = new THREE.SphereGeometry(.012, 5, 4);
 function spark(p, color) { const m = new THREE.Mesh(new THREE.SphereGeometry(.03, 6, 4), new THREE.MeshBasicMaterial({ color, transparent: true })); m.position.copy(p); scene.add(m); sparks.push({ m, t: .3 }); }
 function playFx(m) {
   const d = Math.hypot(m.p[0] - camera.position.x, m.p[2] - camera.position.z) + Math.abs(m.p[1] - camera.position.y) * 2, v = clamp(1 - d / 22, 0, 1);
@@ -375,6 +381,8 @@ const CSS = `
 #phStat{display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.55);padding:5px 10px;border-radius:10px;font-size:13px}
 #phHp{width:150px;height:10px;background:rgba(255,255,255,.15);border-radius:5px;overflow:hidden} #phHp i{display:block;height:100%;background:linear-gradient(90deg,#3c3,#9e4);width:100%}
 #phForms,#phWeap{display:flex;gap:5px;overflow-x:auto;max-width:100%;padding:2px}
+#phCats{display:flex;gap:4px;overflow-x:auto;max-width:100%;padding:1px 2px}
+#phCats button{flex:none;font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(20,24,30,.8)} #phCats button.on{background:#ffb020;color:#111}
 #phForms button,#phWeap button{flex:none;width:58px;height:58px;padding:2px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px;background:rgba(20,24,30,.85);line-height:1.1}
 #phForms button small,#phWeap button small{font-size:10px;color:#ddd;max-width:54px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #phForms button img{width:36px;height:36px} #phForms button.on,#phWeap button.on{background:var(--acc)}
@@ -395,7 +403,7 @@ function ensureDom() {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   const d = document.createElement('div'); d.innerHTML = `<div id="phLobby"></div>
   <div id="phHud"><div id="phTop"></div><div id="phRole"></div><button id="phMenu">☰</button>
-    <div id="phBottom"><div id="phStat"></div><div id="phForms"></div><div id="phWeap"></div></div>
+    <div id="phBottom"><div id="phStat"></div><div id="phCats"></div><div id="phForms"></div><div id="phWeap"></div></div>
     <div id="phTouch"><button data-pt="jump">⤒</button><button data-pt="dash">💨</button><button data-pt="sw">🔄</button><button data-pt="atk" class="big">🔫</button></div></div>
   <div id="phBlind"><b>👹</b><div>你是鬼，眼睛先矇住</div><div id="phBlindT" style="font-size:40px;margin-top:10px"></div></div><div id="phHit"></div>`;
   while (d.firstChild) document.body.appendChild(d.firstChild);
@@ -407,16 +415,31 @@ function ensureDom() {
     b.onclick = e => { e.stopPropagation(); if (isTouch) return; if (a === 'dash') dash(); if (a === 'sw') switchW(); };
   });
 }
+// furniture you can turn into, by category (wall / ceiling mounted things and huge ones are left out)
+const HIDE_GRP = new Set(['馬路', '後室']);
+function catList(g) {
+  if (g === '常用') return P.quick;
+  return Object.keys(CAT).filter(id => CAT[id].grp === g && !(CAT[id].y > 1)).filter(id => { const f = footprint(id); return f.w < 2.6 && f.d < 2.6 && f.h < 2.6; });
+}
+function buildForms() {
+  const groups = ['常用', ...new Set(Object.values(CAT).map(d => d.grp).filter(g => !HIDE_GRP.has(g)))];
+  $('#phCats').innerHTML = groups.map(g => `<button data-cg="${g}" class="${g === P.cat ? 'on' : ''}">${g}</button>`).join('');
+  $('#phCats').querySelectorAll('[data-cg]').forEach(b => b.onclick = e => { e.stopPropagation(); P.cat = b.dataset.cg; buildForms(); });
+  const slots = [['me', '🧍', '人'], ['copy', '🎯', '複製'], ['floor', '🟫', '地板'], ['wall', '🧱', '牆壁'], ...catList(P.cat).map(t => ['q:' + t, `<img src="${thumb(t)}">`, CAT[t].n])];
+  $('#phForms').innerHTML = slots.map(([id, ic, n], i) => `<button data-fm="${id}" title="${i < 9 ? i + 1 : ''}" class="${id === formSlot(P.form) ? 'on' : ''}">${ic}<small>${n}</small></button>`).join('');
+  $('#phForms').querySelectorAll('[data-fm]').forEach(b => b.onclick = e => { e.stopPropagation(); chooseForm(b.dataset.fm); });
+  $('#phForms').scrollLeft = 0;
+}
 function buildHud() {
   ensureDom(); $('#phHud').classList.add('show');
   const hider = P.role === 'hider';
   $('#phForms').style.display = hider ? 'flex' : 'none'; $('#phWeap').style.display = P.role === 'seeker' ? 'flex' : 'none';
-  const slots = [['me', '🧍', '人'], ['copy', '🎯', '複製'], ['floor', '🟫', '地板'], ['wall', '🧱', '牆壁'], ...P.quick.map(t => ['q:' + t, `<img src="${thumb(t)}">`, CAT[t].n])];
-  $('#phForms').innerHTML = slots.map(([id, ic, n], i) => `<button data-fm="${id}" title="${i + 1}">${ic}<small>${n}</small></button>`).join('');
-  $('#phForms').querySelectorAll('[data-fm]').forEach(b => b.onclick = e => { e.stopPropagation(); chooseForm(b.dataset.fm); });
+  $('#phCats').style.display = hider ? 'flex' : 'none';
+  if (hider) buildForms();
   $('#phWeap').innerHTML = Object.entries(WEAP).map(([id, w]) => `<button data-w="${id}">${w.ic}<small>${w.n}</small></button>`).join('');
   $('#phWeap').querySelectorAll('[data-w]').forEach(b => b.onclick = e => { e.stopPropagation(); P.weapon = b.dataset.w; updateHud(); });
   $('#phTouch [data-pt=atk]').style.display = $('#phTouch [data-pt=sw]').style.display = P.role === 'seeker' ? '' : 'none';
+  $('#phTouch [data-pt=dash]').style.display = P.role === 'hider' ? '' : 'none';
   if (!camera.parent) scene.add(camera); if (vm.parent !== camera) camera.add(vm);
 }
 const fmt = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
@@ -426,12 +449,12 @@ function updateHud() {
   const hiders = P.players.filter(p => p.id !== P.seeker), alive = hiders.filter(p => !P.caught.has(p.id)).length;
   $('#phTop').innerHTML = P.phase === 'hide' ? `🙈 躲藏時間 ${fmt(P.left)}<small>鬼還矇著眼睛</small>` : P.phase === 'seek' ? `👹 尋找中 ${fmt(P.left)}<small>還有 ${alive} / ${hiders.length} 人沒被抓</small>` : '🏁 這局結束';
   $('#phRole').innerHTML = (P.role === 'seeker' ? '👹 你是<b>鬼</b>' : P.role === 'spec' ? '😵 已被抓（觀戰）' : '🧍 你是<b>躲藏者</b>') + `<br><span class="mut">鬼：</span><span style="color:${colorOf(P.seeker)}">${nameOf(P.seeker)}</span>`;
-  const show = P.role !== 'spec';
+  const show = P.role === 'hider';
   $('#phStat').style.display = show ? 'flex' : 'none';
-  $('#phStat').innerHTML = `❤️ <div id="phHp"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}　💨 ${'●'.repeat(P.dash)}${'○'.repeat(DASHES - P.dash)}`;
+  $('#phStat').innerHTML = `❤️ <div id="phHp"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}　💨 ${P.boostT > 0 ? `<b style="color:#7cf">${P.boostT.toFixed(1)}s</b> ` : ''}${'●'.repeat(P.dash)}${'○'.repeat(Math.max(0, DASHES - P.dash))}`;
   $('#phWeap').querySelectorAll('[data-w]').forEach(b => b.classList.toggle('on', b.dataset.w === P.weapon));
   $('#phTouch [data-pt=atk]').textContent = WEAP[P.weapon].ic;
-  if (P.role === 'spec') $('#phForms').style.display = 'none';
+  if (P.role === 'spec') $('#phForms').style.display = $('#phCats').style.display = 'none';
   $('#phBlind').classList.toggle('show', P.role === 'seeker' && P.phase === 'hide');
   $('#phBlindT').textContent = Math.ceil(P.left);
 }
@@ -469,15 +492,17 @@ function renderLobby() {
     <div class="grp">玩家（${P.players.length} 人）</div><div class="pl">${P.players.map(p => `<div style="color:${p.color}">● ${p.name}${p.id === P.players[0]?.id ? ' 👑房主' : ''}${p.id === P.myId ? '（你）' : ''}</div>`).join('')}</div>
     ${me ? `<div class="row"><label>躲藏時間</label><select id="phHideT">${[20, 30, 45, 60].map(s => `<option value="${s}" ${s === P.settings.hide ? 'selected' : ''}>${s} 秒</option>`).join('')}</select>
       <label>尋找時間</label><select id="phSeekT">${[120, 180, 240, 300, 480].map(s => `<option value="${s}" ${s === P.settings.seek ? 'selected' : ''}>${s / 60} 分鐘</option>`).join('')}</select></div>
+      <div class="row"><label>💨 加速次數</label><select id="phDashN">${[3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option value="${n}" ${n === (P.settings.dashes || 3) ? 'selected' : ''}>每人 ${n} 次</option>`).join('')}</select><label class="mut">每次 ${BOOST_T} 秒</label></div>
       <div class="mut" style="font-size:12px">開始時隨機選一個人當鬼，用房主目前設計的家來玩。</div>
       <div class="rowb"><button id="phStart" class="go" style="flex:1" ${P.players.length < 2 ? 'disabled' : ''}>▶ 開始遊戲${P.players.length < 2 ? '（等其他人加入）' : ''}</button></div>`
-      : `<p class="mut" style="text-align:center">⏳ 等房主開始遊戲…<br><small>躲藏 ${P.settings.hide} 秒 · 尋找 ${P.settings.seek / 60} 分鐘</small></p>`}
+      : `<p class="mut" style="text-align:center">⏳ 等房主開始遊戲…<br><small>躲藏 ${P.settings.hide} 秒 · 尋找 ${P.settings.seek / 60} 分鐘 · 加速 ${P.settings.dashes || 3} 次</small></p>`}
     <details><summary class="mut" style="font-size:13px">📖 怎麼玩</summary><p style="font-size:13px;line-height:1.6">${HELP}</p></details>
     <div class="rowb"><button id="phLeave" class="danger">🚪 ${me ? '解散房間' : '離開房間'}</button></div></div>`;
   $('#phLeave').onclick = () => leave();
   if (me) {
     $('#phHideT').onchange = e => { P.settings.hide = +e.target.value; bcastLobby(); };
     $('#phSeekT').onchange = e => { P.settings.seek = +e.target.value; bcastLobby(); };
+    $('#phDashN').onchange = e => { P.settings.dashes = +e.target.value; bcastLobby(); };
     $('#phStart').onclick = () => { Snd.init(); startRoundHost(); };
   }
 }
@@ -489,12 +514,8 @@ export function pause() {
 // ---------------- input ----------------
 function switchW() { if (P.role !== 'seeker') return; P.weapon = P.weapon === 'gun' ? 'knife' : 'gun'; updateHud(); }
 function dash() {
-  if (S.mode !== 'prop' || P.dash <= 0 || P.dashT > 0 || !canMove()) return;
-  const k = input.keys; let fx_ = input.jx + ((k.KeyD || k.ArrowRight) ? 1 : 0) - ((k.KeyA || k.ArrowLeft) ? 1 : 0), fz = input.jy + ((k.KeyW || k.ArrowUp) ? 1 : 0) - ((k.KeyS || k.ArrowDown) ? 1 : 0);
-  if (Math.hypot(fx_, fz) < .1) { fx_ = 0; fz = 1; }
-  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
-  P.dashDir.set(-sy * fz + cy * fx_, 0, -cy * fz - sy * fx_).normalize();
-  P.dash--; P.dashT = .3; Snd.init(); Snd.whoosh(); fx.kick = -.03;
+  if (S.mode !== 'prop' || P.role !== 'hider' || P.dash <= 0 || P.boostT > 0 || P.phase === 'end') return;
+  P.dash--; P.boostT = BOOST_T; Snd.init(); Snd.whoosh(); fx.kick = -.03; toast(`💨 加速 ${BOOST_T} 秒！`, 1000);
   if (P.form.k === 'wall') setForm({ k: 'me' });
   updateHud();
 }
@@ -512,14 +533,11 @@ addEventListener('keydown', e => {
 export function canMove() { return S.mode === 'prop' && !(P.role === 'seeker' && P.phase === 'hide') && P.form.k !== 'wall' && !$('#dialog').classList.contains('show'); }
 const camBack = new THREE.Vector3();
 export function updateProp(dt) {
-  for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.t -= dt; s.m.material.opacity = s.t / .3; if (s.t <= 0) { scene.remove(s.m); sparks.splice(i, 1); } }
+  for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.t -= dt; s.m.material.opacity = s.t / (s.T || .3); if (s.v) { s.v.y -= 6 * dt; s.m.position.addScaledVector(s.v, dt); } if (s.t <= 0) { scene.remove(s.m); sparks.splice(i, 1); } }
   if (S.mode !== 'prop') return;
-  if (P.holding && P.role === 'seeker' && P.weapon === 'gun') fire();
-  // dash: a quick burst that still slides along walls
-  if (P.dashT > 0) {
-    P.dashT -= dt; const step = 9 * dt, p = player.pos, n = Math.ceil(step / .06);
-    for (let i = 0; i < n; i++) { const [nx, nz] = pushOut(p.x + P.dashDir.x * step / n, p.z + P.dashDir.z * step / n, p.y, player.r); p.x = nx; p.z = nz; }
-  }
+  if (P.holding && P.role === 'seeker') fire();
+  // 💨 boost: run faster for a few seconds
+  if (P.base) { if (P.boostT > 0) P.boostT = Math.max(0, P.boostT - dt); const m = P.boostT > 0 ? BOOST_X : 1; player.speed = P.base.speed * m; player.run = P.base.run * m; }
   // own disguise follows you; disguised hiders get a camera behind them so they can see what they look like
   if (P.self) {
     if (P.form.k === 'wall' && P.wallAt) { P.self.position.set(P.wallAt[0], P.wallAt[1], P.wallAt[2]); P.self.rotation.y = P.wallAt[3]; }
