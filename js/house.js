@@ -637,7 +637,7 @@ function buildExterior(data) {
   for (let x = -40; x < 40; x += 3) { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, .14), M('#f2f2f2')); m.rotation.x = -Math.PI / 2; m.position.set(cx + x, -0.01, -((front + far) / 2)); exterior.add(m); }
   for (const dd of [front - .9, far + .9]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(90, .12), M('#ffffff')); m.rotation.x = -Math.PI / 2; m.position.set(cx, -0.01, -dd); exterior.add(m); }
   const back = new THREE.Mesh(new THREE.PlaneGeometry(90, 80), extMat.ground); back.rotation.x = -Math.PI / 2; back.position.set(cx, -0.03, -(B.d1 + 40)); exterior.add(back);
-  bx(exterior, 90, .12, 2.2, cx, -0.02, -(far - 1.1), P('stone'));
+  bx(exterior, 90, .05, 2.2, cx, -0.04, -(far - 1.1), P('stone'));
   // neighbouring houses hug the footprint on both sides (never overlapping it)
   const depth = B.d1 - front + .2, zc = -(front + depth / 2 - .1), cols = ['#c9b8a0', '#a9b6c2', '#d6c7b5', '#b6a79e', '#c2b9a8', '#aab0a0'];
   [[B.x0 - .08, -1], [B.x1 + .08, 1]].forEach(([edge, dir], si) => {
@@ -650,14 +650,129 @@ function buildExterior(data) {
       e += dir * w;
     }
   });
-  // houses across the street
-  for (let k = -4; k <= 4; k++) { const w = 5.8, h = 8 + ((k + 8) % 3) * 1.6; bx(exterior, w - .1, h, 10, cx + k * w, 0, -(far - 2.2 - 5), M(cols[(k + 8) % cols.length], { r: .9 })); bx(exterior, w * .6, 2.4, .06, cx + k * w, 0, -(far - 2.2 + .04), M('#8e9499', { m: .5, r: .4 })); for (const y of [3.6, 6.6]) bx(exterior, w * .5, 1.2, .06, cx + k * w, y, -(far - 2.2 + .04), M('#5d7a90', { r: .2, m: .3 })); }
+  neighbourhood(B, cx, front, far, cols);
   const fm = P('facade');
   bx(exterior, 0.4, 3.0, 0.4, B.x0 + .2, 0, -(front + .2), fm); bx(exterior, 0.4, 3.0, 0.4, B.x1 - .2, 0, -(front + .2), fm);
   // invisible boundary: neighbour fronts, the street ends and the far sidewalk
   const L = cx - 30, Rr = cx + 30;
   addSeg(L, front, B.x0 - .06, front, 0, 50, .05); addSeg(B.x1 + .06, front, Rr, front, 0, 50, .05);
   addSeg(B.x0 - .1, front, B.x0 - .1, B.d1 + .1, 0, 50, .03); addSeg(B.x1 + .1, front, B.x1 + .1, B.d1 + .1, 0, 50, .03); // neighbours' side walls
-  addSeg(L, front, L, far, 0, 50, .05); addSeg(Rr, front, Rr, far, 0, 50, .05); addSeg(L, far, Rr, far, 0, 50, .05);
+  // the street ends and the far side (open into the little park)
+  const sw = far - 2.2, pk = PARK(cx, far);
+  addSeg(L, front, L, sw, 0, 50, .05); addSeg(Rr, front, Rr, sw, 0, 50, .05);
+  addSeg(L, sw, pk.x0, sw, 0, 50, .05); addSeg(pk.x0, sw, pk.x0, pk.d1, 0, 50, .05); addSeg(pk.x0, pk.d1, pk.x1, pk.d1, 0, 50, .05); addSeg(pk.x1, pk.d1, pk.x1, sw, 0, 50, .05); addSeg(pk.x1, sw, Rr, sw, 0, 50, .05);
 }
+// ---------- the neighbourhood across the street: houses with shops, a corner store, a little park and a shrine ----------
+const PARK = (cx, far) => ({ x0: cx - 14.3, x1: cx - 3.1, d0: far - 2.2, d1: far - 12 });
+function ext(type, x, d, rot = 0, solid = false, y = 0) {
+  const o = buildFurniture(type); if (!o) return null; o.position.set(x, y, -d); o.rotation.y = rot * DEG; exterior.add(o);
+  if (solid) { const b = new THREE.Box3().setFromObject(o); solidBox(b.min.x, -b.max.z, b.max.x, -b.min.z); }
+  return o;
+}
+function solidBox(x0, d0, x1, d1) { addSeg(x0, d0, x1, d0, 0, 50, .03); addSeg(x1, d0, x1, d1, 0, 50, .03); addSeg(x1, d1, x0, d1, 0, 50, .03); addSeg(x0, d1, x0, d0, 0, 50, .03); }
+function signTex(text, bg, fg, w = 256, h = 64, vertical = false) {
+  return canvasPlane(1, 1, w, h, (x, W, Hh) => {
+    x.fillStyle = bg; x.fillRect(0, 0, W, Hh); x.fillStyle = fg; x.textAlign = 'center'; x.textBaseline = 'middle';
+    if (vertical) { const n = text.length, fs = Math.min(W * .8, Hh / n * .85); x.font = `bold ${fs}px sans-serif`; [...text].forEach((ch, i) => x.fillText(ch, W / 2, (i + .5) * Hh / n)); }
+    else { x.font = `bold ${Math.floor(Hh * .62)}px sans-serif`; x.fillText(text, W / 2, Hh / 2 + 2); }
+  });
+}
+function sign(text, bg, fg, w, h, x, y, z, ry = 0, vertical = false) {
+  const m = signTex(text, bg, fg, vertical ? 64 : 256, vertical ? 256 : 64, vertical); m.emissive = new THREE.Color('#ffffff'); m.emissiveMap = m.map; m.emissiveIntensity = .35; m.side = THREE.DoubleSide;
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m); p.position.set(x, y, z); p.rotation.y = ry; exterior.add(p); return p;
+}
+const SHOPS = [['早餐店', '#f2a020'], ['水果行', '#3a9a4a'], ['五金行', '#2a5aa8'], ['理髮院', '#c83a5a'], ['藥局', '#1a8a7a'], ['麵店', '#c8502a']];
+function neighbourhood(B, cx, front, far, cols) {
+  const sw = far - 2.2, glassM = M('#5d7a90', { r: .2, m: .3 }), shutter = M('#8e9499', { m: .5, r: .4 });
+  const zf = -sw - .04, PI = Math.PI; // the street-facing fronts across the road (the street is towards -z)
+  // a row of houses; slots -2,-1 are the park, 1 the corner store, 3 the shrine
+  for (let k = -5; k <= 5; k++) {
+    const w = 5.8, xc = cx + k * w, h = 8 + ((k + 8) % 3) * 1.6, c = cols[(k + 8) % cols.length];
+    if (k === -2 || k === -1) continue;
+    if (k === 1) { store(xc, sw, w); continue; }
+    if (k === 3) { shrine(xc, sw, w, c); continue; }
+    bx(exterior, w - .1, h, 10, xc, 0, -(sw - 5), M(c, { r: .9 }));
+    for (const y of [3.6, 6.6]) bx(exterior, w * .5, 1.2, .06, xc, y, zf, glassM);
+    const shop = SHOPS[(k + 6) % SHOPS.length];
+    if (k % 2 === 0) { // a little shop on the ground floor: awning, sign, goods
+      bx(exterior, w * .8, 2.4, .06, xc, 0, zf, M('#2a2e33', { r: .4 }));
+      const aw = bx(exterior, w * .86, .06, 1.1, xc, 2.55, zf - .5, M(shop[1], { r: .6 })); aw.rotation.x = -.25;
+      sign(shop[0], shop[1], '#ffffff', 2.4, .6, xc, 3.1, zf - .05, PI);
+      sign(shop[0], '#fffbe8', shop[1], .5, 2, xc + w / 2 - .5, 4.6, zf - .5, PI / 2, true);
+      ext(['crate', 'boxes', 'clutter', 'bucket'][(k + 8) % 4], xc - 1.2, sw + .5, 0);
+    } else bx(exterior, w * .6, 2.4, .06, xc, 0, zf, shutter);
+  }
+  // ---- the corner store ----
+  function store(xc, sw, w) {
+    bx(exterior, w - .1, 9, 10, xc, 0, -(sw - 5), M('#e8e4dc', { r: .9 }));
+    const shelves = canvasPlane(1, 1, 256, 128, (x, W, Hh) => { x.fillStyle = '#f6f8f4'; x.fillRect(0, 0, W, Hh); const cs = ['#e33', '#3a6', '#fc3', '#39f', '#f80', '#a3e', '#fff']; for (let r = 0; r < 4; r++) { x.fillStyle = '#c8ccd0'; x.fillRect(0, 18 + r * 28, W, 3); for (let i = 0; i < 40; i++) { x.fillStyle = cs[(i * 7 + r * 3) % 7]; x.fillRect(i * 6.4 + 1, 4 + r * 28, 5, 14); } } });
+    shelves.emissive = new THREE.Color('#ffffff'); shelves.emissiveMap = shelves.map; shelves.emissiveIntensity = .55;
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(w * .86, 2.5), shelves); g.position.set(xc, 1.3, -sw - .05); g.rotation.y = PI; exterior.add(g);
+    bx(exterior, w * .9, .08, .1, xc, 0, -sw - .06, M('#bbb', { m: .6 })); for (const dx of [-w * .45, 0, w * .45]) bx(exterior, .08, 2.6, .1, xc + dx, 0, -sw - .06, M('#bbb', { m: .6 }));
+    for (const [y, col] of [[2.65, '#f2c230'], [2.8, '#2a6ab0'], [2.95, '#2a6ab0']]) bx(exterior, w - .1, .15, .14, xc, y, -sw - .1, M(col, { r: .5 }));
+    sign('便利商店 24H', '#ffffff', '#2a6ab0', 3, .5, xc, 3.45, -sw - .2, PI);
+    ext('vending_machine', xc + w / 2 - .7, sw + .45, 180, true);
+    ext('trash_can', xc - w / 2 + .5, sw + .4, 0); ext('mailbox', xc - w / 2 + 1.4, sw + .4, 180, true);
+  }
+  // ---- a small shrine (土地公廟) with a courtyard ----
+  function shrine(xc, sw, w, c) {
+    bx(exterior, w - .1, 7.5, 6, xc, 0, -(sw - 7), M(c, { r: .9 }));
+    bx(exterior, w - .1, .06, 4, xc, -.03, -(sw - 2), M('#b8b0a0', { r: .9 }));
+    const red = M('#b8241c', { r: .6 }), gold = M('#e0b040', { m: .5, r: .4 }), tile = M('#c8642a', { r: .7 });
+    bx(exterior, 3.2, 2.6, 2.4, xc, 0, -(sw - 2.9), red); bx(exterior, 1.2, 1.7, .05, xc, .2, -(sw - 1.68), M('#2a1410'));
+    for (const s of [-1, 1]) { const r = bx(exterior, 2.0, .12, 2.9, xc + s * .8, 2.75, -(sw - 2.9), tile); r.rotation.z = s * -.42; }
+    bx(exterior, 3.4, .14, .14, xc, 3.15, -(sw - 2.9), gold);
+    for (const s of [-1, 1]) { sp(exterior, .12, xc + s * 1.75, 3.25, -(sw - 2.9), gold); cy(exterior, .07, .07, 2.6, xc + s * 1.45, 0, -(sw - 1.62), red, 10); }
+    sign('福德祠', '#b8241c', '#ffd23a', 1.2, .32, xc, 2.25, -(sw - 1.64), PI);
+    cy(exterior, .3, .22, .55, xc, 0, -(sw - 1.0), M('#3a2a1a', { m: .4, r: .5 }), 16); for (let i = 0; i < 3; i++) cy(exterior, .006, .006, .25, xc - .05 + i * .05, .55, -(sw - 1.0), M('#c8301a'), 4);
+    for (const s of [-1, 1]) ext('red_lantern', xc + s * 1.2, sw - 1.64, 0, false, 2.6);
+    solidBox(xc - 1.6, sw - 1.7, xc + 1.6, sw - 4.1);
+  }
+  // ---- the little park ----
+  const pk = PARK(cx, far), pw = pk.x1 - pk.x0, pd = pk.d0 - pk.d1, pcx = (pk.x0 + pk.x1) / 2, pcd = (pk.d0 + pk.d1) / 2;
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(pw, pd), M('#6a9a4a', { r: 1 })); grass.rotation.x = -Math.PI / 2; grass.position.set(pcx, -0.005, -pcd); exterior.add(grass);
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(1.6, pd), M('#c8b898', { r: 1 })); path.rotation.x = -Math.PI / 2; path.position.set(pcx, 0, -pcd); exterior.add(path);
+  const hedge = M('#3f7a34', { r: 1 });
+  bx(exterior, pw, .9, .5, pcx, 0, -(pk.d1 + .25), hedge); for (const x of [pk.x0 + .25, pk.x1 - .25]) bx(exterior, .5, .9, pd, x, 0, -pcd, hedge);
+  for (const x of [pk.x0 + .25, pk.x1 - .25]) bx(exterior, .5, .9, .1, x, 0, -(pk.d0 - .05), hedge);
+  sign('社區公園', '#3a6a2a', '#ffffff', 1.6, .4, pk.x0 + 1.3, 1.6, -(pk.d0 - .1), PI); cy(exterior, .05, .05, 1.4, pk.x0 + 1.3, 0, -(pk.d0 - .12), M('#555'));
+  for (const [x, d] of [[pk.x0 + 1.4, pk.d1 + 1.6], [pk.x1 - 1.4, pk.d1 + 1.6], [pk.x0 + 1.2, pcd + .5], [pk.x1 - 1.2, pcd - .8]]) ext('street_tree', x, d, 0);
+  ext('bench', pcx - 2.2, pk.d1 + 1.2, 0); ext('bench', pcx + 2.2, pk.d1 + 1.2, 0);
+  ext('kids_slide', pcx + 3, pcd, 90, true); ext('street_lamp', pcx - 1.2, pk.d0 - 1.2, 90);
+  ext('trash_can', pcx + 1.1, pk.d0 - .9, 0); ext('mushroom_stool', pcx - 3.4, pcd - 1.6, 0); ext('mushroom_stool', pcx - 2.8, pcd - 2.1, 0);
+  // swings
+  { const g = new THREE.Group(), mt = M('#d84a3a', { m: .4, r: .4 }), x0 = pcx - 3.2, d0 = pcd + 1.2;
+    for (const s of [-1, 1]) for (const t of [-1, 1]) { const l = bx(g, .08, 2.3, .08, s * 1.3, 0, t * .5, mt); l.rotation.x = -t * .2; }
+    const top = cy(g, .05, .05, 2.7, 0, 2.15, 0, mt, 8); top.rotation.z = Math.PI / 2; top.position.y = 2.15;
+    for (const sx of [-.55, .55]) { for (const r of [-.18, .18]) cy(g, .008, .008, 1.6, sx + r, .55, 0, M('#888', { m: .8 }), 4); bx(g, .45, .04, .2, sx, .53, 0, M('#2a6ab0')); }
+    g.position.set(x0, 0, -d0); exterior.add(g); solidBox(x0 - 1.4, d0 - .6, x0 + 1.4, d0 + .6); }
+  // sandbox
+  bx(exterior, 2.2, .2, 1.6, pcx + 2.8, 0, -(pk.d1 + 3.0), M('#b8884a')); bx(exterior, 2.0, .02, 1.4, pcx + 2.8, .19, -(pk.d1 + 3.0), M('#e8d8a8', { r: 1 })); ext('bucket_mop', pcx + 2.4, pk.d1 + 3.1, 0, false, .2); ext('ball', pcx + 3.3, pk.d1 + 2.8, 0, false, .2);
+  // a pavilion
+  { const x0 = pcx - 3.3, d0 = pk.d1 + 3.6, wd = M('#7a4a2a', { r: .7 });
+    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { cy(exterior, .08, .08, 2.4, x0 + a * 1.1, 0, -(d0 + b * 1.1), wd, 8); solidBox(x0 + a * 1.1 - .1, d0 + b * 1.1 - .1, x0 + a * 1.1 + .1, d0 + b * 1.1 + .1); }
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.0, 1.0, 4), M('#2f5a3a', { r: .6 })); roof.rotation.y = Math.PI / 4; roof.position.set(x0, 2.9, -d0); exterior.add(roof);
+    bx(exterior, 1.2, .05, .7, x0, .7, -d0, wd); for (const s of [-1, 1]) bx(exterior, 1.0, .05, .3, x0, .42, -(d0 + s * .6), wd); }
+  // ---- street furniture ----
+  for (let x = cx - 26; x <= cx + 26; x += 13) if (x < pk.x0 - .5 || x > pk.x1 + .5) ext('street_lamp', x, sw + .35, 180);
+  ext('bus_stop', cx + 9, sw + .4, 180); ext('bench', cx + 10.4, sw + .55, 180);
+  ext('fire_hydrant', cx + 13.5, sw + .4, 0); ext('trash_can', cx - 17, sw + .4, 0);
+  ext('car', cx + 15.5, far + 1.3, 90, true); ext('car', cx - 20.5, far + 1.3, -90, true);
+  // utility poles with sagging wires along our side of the street
+  const poleXs = [cx - 24, cx - 12, B.x1 + 3.5, cx + 18];
+  for (const x of poleXs) {
+    cy(exterior, .13, .17, 8.5, x, 0, -(front - .5), M('#9a9a92', { r: .9 }), 10); bx(exterior, 1.6, .1, .1, x, 7.6, -(front - .5), M('#555'));
+    cy(exterior, .22, .22, .7, x + .35, 6.4, -(front - .3), M('#7a8088', { m: .4 }), 12); solidBox(x - .18, front - .68, x + .18, front - .32);
+  }
+  for (let i = 0; i < poleXs.length - 1; i++) for (const dz of [-.7, 0, .7]) {
+    const a = poleXs[i], b = poleXs[i + 1], L = b - a, wire = cy(exterior, .012, .012, L, (a + b) / 2, 0, -(front - .5) + dz * .1, M('#1a1a1a'), 4);
+    wire.rotation.z = Math.PI / 2; wire.position.y = 7.55 - (dz === 0 ? .35 : .15);
+  }
+  // scooters parked in front of the neighbours (never in front of our gate)
+  let n = 0; for (const [x0, dir] of [[B.x0 - 1.2, -1], [B.x1 + 1.2, 1]]) for (let i = 0; i < 4; i++) ext('scooter', x0 + dir * i * .75, front - 1.0, 180 + ((n++ % 3) - 1) * 6);
+  // a zebra crossing and a few cones
+  for (let i = 0; i < 7; i++) { const z = new THREE.Mesh(new THREE.PlaneGeometry(.45, Math.max(2, front - far - 2.2)), M('#f2f2f2')); z.rotation.x = -Math.PI / 2; z.position.set(B.x1 + 6 + i * .8, -0.008, -((front + far) / 2)); exterior.add(z); }
+  for (const x of [L0(cx), R0(cx)]) for (let i = 0; i < 4; i++) ext('barrier', x, front - 1.5 - i * 2.6, 90);
+}
+const L0 = cx => cx - 29.4, R0 = cx => cx + 29.4;
 export function addBoundarySegs() { }

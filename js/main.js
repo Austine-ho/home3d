@@ -65,7 +65,7 @@ $('#btnAdmin').onclick = () => {
   if (!ok) { const pw = prompt('🔐 管理員密碼'); if (pw === null) return; if (pw.trim() !== '3') return toast('密碼錯誤'); try { sessionStorage.setItem('home3d_admin', '1'); } catch (e) { } }
   setMode('plan', 'admin'); toast('🔐 已進入管理員遊戲編輯');
 };
-$('#pauseBtn').onclick = () => S.mode === 'game' ? openPause() : setMode('menu');
+$('#pauseBtn').onclick = () => S.mode === 'game' ? openPause() : S.mode === 'prop' ? propPause() : setMode('menu');
 $('#pDone2').onclick = () => setMode('visit');
 function updateMenu() {
   const g = k => { try { return JSON.parse(localStorage.getItem('home_game_' + k)) || {}; } catch (e) { return {}; } };

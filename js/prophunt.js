@@ -10,22 +10,22 @@ import { Snd, showDialog } from './games.js';
 const PEER_SRC = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const ID_PRE = 'home3d-prophunt-';
 const COLORS = ['#4aa3ff', '#ffb020', '#5ad16a', '#ff6ad5', '#9a7bff', '#2fd6d0', '#ff8a4a', '#f0f0f0'];
-const SMALL = { eye: .5, r: .11, lo: .2, hi: .62, speed: 2.4, run: 3.5, jump: 3.3 };
+const SMALL = { eye: .5, r: .11, lo: .2, hi: .62, speed: 2.4, run: 3.5, jump: 3.96 }; // jump ×1.2
 const NORMAL = { eye: 1.58, r: .24, lo: .36, hi: 1.7, speed: 4.4, run: 6.2, jump: 4.2 };
-const WEAP = { gun: { n: '槍', ic: '🔫', dmg: 14, cd: .38, range: 30 }, knife: { n: '刀', ic: '🔪', dmg: 34, cd: .6, range: 1.5 } };
-const CAUGHT_HP = 15, TAUNT_EVERY = 30, BOOST_T = 3, BOOST_X = 1.8, HIDER_X = 1.1;
+const WEAP = { gun: { n: '槍', ic: '🔫', dmg: 14, cd: .38 / 1.3, range: 30 }, knife: { n: '刀', ic: '🔪', dmg: 34, cd: .6 / 1.3, range: 1.5 } }; // attack rate ×1.3
+const CAUGHT_HP = 15, TAUNT_EVERY = 30, BOOST_T = 3, BOOST_X = 1.8, SPRAY_R = 5, SPRAY_T = 2;
 let DASHES = 3;
 const HELP = `<b>玩法</b><br>開始時隨機一個人當 <b>👹 鬼</b>，其他人是 <b>🧍 躲藏者</b>。所有人都縮小了，家變得超大。<br><br>
-<b>🧍 躲藏者</b>：鬼出發前先躲好。隨時可以用下方圖示變身成家具、地板或牆壁（R 旋轉）。🎯 會變成你正在看的那件家具。下方可以切換家具種類。💨 加速可以跑快 ${BOOST_T} 秒（次數由房主設定），平常也比鬼快一點。被鬼打到血快沒了（剩 ${CAUGHT_HP}）就算被抓。每 ${TAUNT_EVERY} 秒所有躲藏者會發出一聲笑聲。<br><br>
+<b>🧍 躲藏者</b>：鬼出發前先躲好。隨時可以用下方圖示變身成家具、地板或牆壁（R 旋轉）。🎯 會變成你正在看的那件家具。下方可以切換家具種類。💨 加速可以跑快 ${BOOST_T} 秒（次數由房主設定），🌫 噴霧每局只能用 1 次：噴在鬼附近（${SPRAY_R} 公尺內），鬼會 ${SPRAY_T} 秒看不清楚。被鬼打到血快沒了（剩 ${CAUGHT_HP}）就算被抓。每 ${TAUNT_EVERY} 秒所有躲藏者會發出一聲笑聲。<br><br>
 <b>👹 鬼</b>：躲藏時間內眼睛被矇住。之後用 🔫 槍或 🔪 刀找人（Q 切換），按住就能一直攻擊、不會扣血。打中躲藏者會噴出一點血。<br><br>
 <b>勝負</b>：時間內抓到所有人鬼贏，撐到時間結束躲藏者贏。<br><br>
-<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 加速 ${BOOST_T} 秒、空白鍵跳、1–9 變身、R 旋轉、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
+<small>🎮 WASD 移動、滑鼠看、左鍵攻擊、F 💨 加速 ${BOOST_T} 秒、V 🌫 噴霧、空白鍵跳、1–9 變身、R 旋轉、E 開門、Alt 放開滑鼠、Esc 選單<br>📱 左半邊搖桿、右半邊轉視角、右下按鈕</small>`;
 
 const P = {
   peer: null, host: false, conns: {}, hostConn: null, myId: null, code: '', name: '',
   players: [], settings: { hide: 30, seek: 240, dashes: 3 }, view: 'home',
   phase: 'off', left: 0, role: 'hider', seeker: null, caught: new Set(), states: {},
-  hp: 100, dash: 3, boostT: 0, base: null, cat: '常用', slot: 'me', form: { k: 'me' }, frot: 0, anchor: null,
+  hp: 100, dash: 3, spray: 1, blindT: 0, boostT: 0, base: null, cat: '常用', slot: 'me', form: { k: 'me' }, frot: 0, anchor: null,
   weapon: 'gun', cd: 0, holding: false, remotes: {}, self: null, ownData: null, hooks: {}, stT: 0, relayT: 0, doorT: 0, tauntT: TAUNT_EVERY, doors: [], quick: [],
 };
 export const Prop = P;
@@ -117,6 +117,7 @@ function hostRecv(from, m, conn) {
   if (m.t === 'hit') { if (P.phase === 'seek' && from === P.seeker && !P.caught.has(m.to)) sendTo(m.to, { t: 'hurt', dmg: m.dmg, by: from }); return; }
   if (m.t === 'caught') { if (P.caught.has(from) || from === P.seeker) return; P.caught.add(from); bcast({ t: 'caught', id: from }); checkAllCaught(); return; }
   if (m.t === 'door' || m.t === 'fx') { bcast(m, from); return; }
+  if (m.t === 'spray') { if (P.phase === 'seek' || P.phase === 'hide') bcast({ ...m, by: from }); return; }
 }
 function checkAllCaught() {
   if (P.phase !== 'seek' && P.phase !== 'hide') return;
@@ -176,6 +177,7 @@ function clientRecv(m) {
     case 'door': { const d = H.doors[m.i]; if (d) { d.open = m.o; if (d.pair) d.pair.open = m.o; P.doors[m.i] = m.o; } break; }
     case 'fx': playFx(m); break;
     case 'taunt': taunt(); break;
+    case 'spray': sprayFx(m); break;
   }
 }
 
@@ -189,13 +191,11 @@ function startRound(m) {
   S.data = JSON.parse(JSON.stringify(m.data)); build(S.data);
   P.players = m.players; P.seeker = m.seeker; P.caught = new Set(); P.states = {};
   P.role = m.seeker === P.myId ? 'seeker' : 'hider';
-  DASHES = m.dashes || 3; P.hp = 100; P.dash = DASHES; P.boostT = 0; P.cat = '常用'; P.slot = 'me'; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;
+  DASHES = m.dashes || 3; P.hp = 100; P.dash = DASHES; P.spray = 1; P.blindT = 0; P.boostT = 0; P.cat = '常用'; P.slot = 'me'; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;
   P.phase = 'hide'; setLeft(m.hide); P.doors = H.doors.map(d => d.open);
   for (const id in P.remotes) scene.remove(P.remotes[id].g); P.remotes = {};
   P.hooks.setMode('prop');
   applySize(SMALL); camera.fov = 80; camera.updateProjectionMatrix();
-  // hiders walk a little faster than the seeker
-  if (P.role === 'hider') { player.speed *= HIDER_X; player.run *= HIDER_X; }
   P.base = { speed: player.speed, run: player.run };
   P.hooks.goHome();
   const i = P.players.findIndex(p => p.id === P.myId); player.pos.x += ((i % 4) - 1.5) * .35; player.pos.z += Math.floor(i / 4) * .35;
@@ -209,6 +209,7 @@ export function stopRound() {
   for (const id in P.remotes) scene.remove(P.remotes[id].g); P.remotes = {};
   if (P.self) { scene.remove(P.self); P.self = null; }
   vm.visible = false; $('#phHud')?.classList.remove('show'); $('#phBlind')?.classList.remove('show');
+  P.blindT = 0; P.boostT = 0; const fog = $('#phFog'); if (fog) { fog.style.opacity = 0; fog.style.backdropFilter = fog.style.webkitBackdropFilter = 'none'; }
   if (player.eye !== NORMAL.eye) { applySize(NORMAL); camera.fov = 72; camera.updateProjectionMatrix(); }
   if (P.ownData) { S.data = P.ownData; P.ownData = null; build(S.data); }
   if (P.phase !== 'off' && P.phase !== 'lobby') P.phase = 'lobby';
@@ -229,7 +230,9 @@ function pickQuick() {
   const cnt = {};
   for (const f of S.data.floors) for (const x of f.furniture || []) if (CAT[x.type]) cnt[x.type] = (cnt[x.type] || 0) + 1;
   const ok = t => { const g = buildFurniture(t); const b = new THREE.Box3().setFromObject(g), s = b.getSize(V); return s.y < 1.3 && s.x < 1.3 && s.z < 1.3; };
-  const list = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).filter(ok).slice(0, 6);
+  const list = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).filter(ok).slice(0, 8);
+  // always a few handy small things too
+  for (const t of ['cardboard_box', 'cushion', 'garbage_bag', 'plant', 'trash_can', 'basketball', 'sleeping_cat', 'bucket_mop']) if (list.length < 14 && CAT[t] && !list.includes(t)) list.push(t);
   return list;
 }
 const surfMat = key => { const s = H.surf[key]?.[0]; if (!s) return new THREE.MeshStandardMaterial({ color: '#bbb' }); return Array.isArray(s.mesh.material) ? s.mesh.material[s.idx] : s.mesh.material; };
@@ -263,7 +266,16 @@ function setForm(f) {
   document.querySelectorAll('#phForms [data-fm]').forEach(b => b.classList.toggle('on', b.dataset.fm === formSlot(f)));
 }
 const formSlot = f => f.k === 'f' ? P.slot : f.k;
-function aimHit(far, objs) { ray.setFromCamera({ x: 0, y: 0 }, camera); ray.far = far; return ray.intersectObjects(objs, true)[0]; }
+// hidden things (name tags the seeker can't see, caught players) never stop a shot; hit boxes do
+const shown = o => { for (; o; o = o.parent) if (!o.visible && !o.userData.hitbox) return false; return true; };
+function aimHit(far, objs) { ray.setFromCamera({ x: 0, y: 0 }, camera); ray.far = far; return ray.intersectObjects(objs, true).find(h => shown(h.object)); }
+// an invisible box a bit bigger than a hider's disguise, so thin forms (floor tiles, small props) are still hittable
+const hbMat = new THREE.MeshBasicMaterial({ visible: false });
+function addHitbox(mesh) {
+  const b = new THREE.Box3().setFromObject(mesh), sz = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(Math.max(.26, sz.x + .06), Math.max(.22, sz.y + .06), Math.max(.26, sz.z + .06)), hbMat);
+  hb.position.set(c.x - mesh.position.x, Math.max(.11, c.y - mesh.position.y), c.z - mesh.position.z); hb.userData.hitbox = true; mesh.add(hb);
+}
 function chooseForm(slot) {
   if (P.role !== 'hider' || P.phase === 'end') return;
   if (slot === 'me') return setForm({ k: 'me' });
@@ -351,6 +363,28 @@ function hurt(dmg) {
   if (P.hp <= CAUGHT_HP) { P.hp = Math.max(P.hp, 1); send({ t: 'caught' }); }
   updateHud();
 }
+function spray() {
+  if (S.mode !== 'prop' || P.role !== 'hider' || P.spray <= 0 || P.phase === 'end') return;
+  P.spray--; Snd.init();
+  const d = V.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  send({ t: 'spray', p: [player.pos.x + d.x * .4, player.pos.y + .3, player.pos.z + d.z * .4], d: [d.x, d.z] });
+  if (P.form.k === 'wall') setForm({ k: 'me' });
+  updateHud();
+}
+const fogG = new THREE.SphereGeometry(.12, 8, 6);
+function sprayFx(m) {
+  const o = new THREE.Vector3(...m.p);
+  for (let i = 0; i < 26; i++) {
+    const mt = new THREE.MeshBasicMaterial({ color: i % 3 ? '#e8eef2' : '#bfe6d0', transparent: true, opacity: .7, depthWrite: false });
+    const mesh = new THREE.Mesh(fogG, mt); mesh.position.copy(o); mesh.scale.setScalar(.5 + Math.random()); scene.add(mesh);
+    const sp = 1.2 + Math.random() * 2.4;
+    sparks.push({ m: mesh, t: 1.6, T: 1.6, grow: 1.8, v: new THREE.Vector3(m.d[0] * sp + (Math.random() - .5) * 1.2, (Math.random() - .2) * .7, m.d[1] * sp + (Math.random() - .5) * 1.2), drag: 1 });
+  }
+  const dist = o.distanceTo(player.pos);
+  if (dist < 14) { Snd.noise(.6, .25 * clamp(1 - dist / 14, 0, 1), 3000, 'highpass', 900); }
+  if (P.role === 'seeker' && P.phase === 'seek' && dist < SPRAY_R) { P.blindT = SPRAY_T; fx.shake = .3; toast('🌫 被噴霧噴到了，看不清楚！', 1500); }
+  else if (m.by === P.myId) toast('🌫 噴霧！', 900);
+}
 function taunt() {
   Snd.init();
   if (P.role === 'hider') { Snd.giggle(0, .07); toast('😄 你發出了笑聲…', 1000); }
@@ -393,6 +427,7 @@ body.touch #phTouch{display:flex}
 #phBlind{position:fixed;inset:0;background:#000;z-index:8;display:none;align-items:center;justify-content:center;flex-direction:column;font-size:22px;text-align:center;pointer-events:none}
 #phBlind.show{display:flex} #phBlind b{font-size:64px;color:#ff5a3a}
 #phHit{position:fixed;left:50%;top:50%;width:26px;height:26px;margin:-13px;pointer-events:none;z-index:9;opacity:0;border:3px solid #ff3a2a;border-radius:50%}
+#phFog{position:fixed;inset:0;pointer-events:none;z-index:6;opacity:0;background:radial-gradient(circle,rgba(235,240,238,.55),rgba(215,228,222,.9))}
 #phHit.on{animation:phh .25s} @keyframes phh{0%{opacity:1;transform:scale(.6)}100%{opacity:0;transform:scale(1.4)}}
 body[data-mode=prop] #cross{display:block} body[data-mode=prop] #flname{display:block}
 body.touch #phBottom{left:auto;right:auto;left:50%}
@@ -404,25 +439,25 @@ function ensureDom() {
   const d = document.createElement('div'); d.innerHTML = `<div id="phLobby"></div>
   <div id="phHud"><div id="phTop"></div><div id="phRole"></div><button id="phMenu">☰</button>
     <div id="phBottom"><div id="phStat"></div><div id="phCats"></div><div id="phForms"></div><div id="phWeap"></div></div>
-    <div id="phTouch"><button data-pt="jump">⤒</button><button data-pt="dash">💨</button><button data-pt="sw">🔄</button><button data-pt="atk" class="big">🔫</button></div></div>
-  <div id="phBlind"><b>👹</b><div>你是鬼，眼睛先矇住</div><div id="phBlindT" style="font-size:40px;margin-top:10px"></div></div><div id="phHit"></div>`;
+    <div id="phTouch"><button data-pt="jump">⤒</button><button data-pt="spray">🌫</button><button data-pt="dash">💨</button><button data-pt="sw">🔄</button><button data-pt="atk" class="big">🔫</button></div></div>
+  <div id="phBlind"><b>👹</b><div>你是鬼，眼睛先矇住</div><div id="phBlindT" style="font-size:40px;margin-top:10px"></div></div><div id="phHit"></div><div id="phFog"></div>`;
   while (d.firstChild) document.body.appendChild(d.firstChild);
   $('#phMenu').onclick = e => { e.stopPropagation(); pause(); };
   document.querySelectorAll('#phTouch [data-pt]').forEach(b => {
     const a = b.dataset.pt;
-    b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (a === 'atk') { P.holding = true; fire(); } if (a === 'jump') input.keys.Space = true; if (a === 'dash') dash(); if (a === 'sw') switchW(); }, { passive: false });
+    b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); if (a === 'atk') { P.holding = true; fire(); } if (a === 'jump') input.keys.Space = true; if (a === 'dash') dash(); if (a === 'spray') spray(); if (a === 'sw') switchW(); }, { passive: false });
     b.addEventListener('touchend', e => { e.preventDefault(); if (a === 'atk') P.holding = false; if (a === 'jump') input.keys.Space = false; }, { passive: false });
-    b.onclick = e => { e.stopPropagation(); if (isTouch) return; if (a === 'dash') dash(); if (a === 'sw') switchW(); };
+    b.onclick = e => { e.stopPropagation(); if (isTouch) return; if (a === 'spray') spray(); if (a === 'dash') dash(); if (a === 'sw') switchW(); };
   });
 }
 // furniture you can turn into, by category (wall / ceiling mounted things and huge ones are left out)
-const HIDE_GRP = new Set(['馬路', '後室']);
+const HIDE_GRP = new Set(['後室']);
 function catList(g) {
   if (g === '常用') return P.quick;
   return Object.keys(CAT).filter(id => CAT[id].grp === g && !(CAT[id].y > 1)).filter(id => { const f = footprint(id); return f.w < 2.6 && f.d < 2.6 && f.h < 2.6; });
 }
 function buildForms() {
-  const groups = ['常用', ...new Set(Object.values(CAT).map(d => d.grp).filter(g => !HIDE_GRP.has(g)))];
+  const groups = ['常用', '小物件', ...new Set(Object.values(CAT).map(d => d.grp).filter(g => !HIDE_GRP.has(g) && g !== '小物件'))];
   $('#phCats').innerHTML = groups.map(g => `<button data-cg="${g}" class="${g === P.cat ? 'on' : ''}">${g}</button>`).join('');
   $('#phCats').querySelectorAll('[data-cg]').forEach(b => b.onclick = e => { e.stopPropagation(); P.cat = b.dataset.cg; buildForms(); });
   const slots = [['me', '🧍', '人'], ['copy', '🎯', '複製'], ['floor', '🟫', '地板'], ['wall', '🧱', '牆壁'], ...catList(P.cat).map(t => ['q:' + t, `<img src="${thumb(t)}">`, CAT[t].n])];
@@ -439,7 +474,7 @@ function buildHud() {
   $('#phWeap').innerHTML = Object.entries(WEAP).map(([id, w]) => `<button data-w="${id}">${w.ic}<small>${w.n}</small></button>`).join('');
   $('#phWeap').querySelectorAll('[data-w]').forEach(b => b.onclick = e => { e.stopPropagation(); P.weapon = b.dataset.w; updateHud(); });
   $('#phTouch [data-pt=atk]').style.display = $('#phTouch [data-pt=sw]').style.display = P.role === 'seeker' ? '' : 'none';
-  $('#phTouch [data-pt=dash]').style.display = P.role === 'hider' ? '' : 'none';
+  $('#phTouch [data-pt=dash]').style.display = $('#phTouch [data-pt=spray]').style.display = P.role === 'hider' ? '' : 'none';
   if (!camera.parent) scene.add(camera); if (vm.parent !== camera) camera.add(vm);
 }
 const fmt = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
@@ -451,9 +486,10 @@ function updateHud() {
   $('#phRole').innerHTML = (P.role === 'seeker' ? '👹 你是<b>鬼</b>' : P.role === 'spec' ? '😵 已被抓（觀戰）' : '🧍 你是<b>躲藏者</b>') + `<br><span class="mut">鬼：</span><span style="color:${colorOf(P.seeker)}">${nameOf(P.seeker)}</span>`;
   const show = P.role === 'hider';
   $('#phStat').style.display = show ? 'flex' : 'none';
-  $('#phStat').innerHTML = `❤️ <div id="phHp"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}　💨 ${P.boostT > 0 ? `<b style="color:#7cf">${P.boostT.toFixed(1)}s</b> ` : ''}${'●'.repeat(P.dash)}${'○'.repeat(Math.max(0, DASHES - P.dash))}`;
+  $('#phStat').innerHTML = `❤️ <div id="phHp"><i style="width:${P.hp}%;${P.hp < 35 ? 'background:#e33' : ''}"></i></div> ${Math.ceil(P.hp)}　💨 ${P.boostT > 0 ? `<b style="color:#7cf">${P.boostT.toFixed(1)}s</b> ` : ''}${'●'.repeat(P.dash)}${'○'.repeat(Math.max(0, DASHES - P.dash))}　<span style="opacity:${P.spray ? 1 : .35}">🌫 ${P.spray}</span>`;
   $('#phWeap').querySelectorAll('[data-w]').forEach(b => b.classList.toggle('on', b.dataset.w === P.weapon));
   $('#phTouch [data-pt=atk]').textContent = WEAP[P.weapon].ic;
+  $('#phTouch [data-pt=spray]').style.opacity = P.spray ? 1 : .35;
   if (P.role === 'spec') $('#phForms').style.display = $('#phCats').style.display = 'none';
   $('#phBlind').classList.toggle('show', P.role === 'seeker' && P.phase === 'hide');
   $('#phBlindT').textContent = Math.ceil(P.left);
@@ -524,6 +560,7 @@ on.propUp = () => { P.holding = false; };
 addEventListener('keydown', e => {
   if (S.mode !== 'prop' || e.repeat || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
   if (e.code === 'KeyF') dash();
+  if (e.code === 'KeyV') spray();
   if (e.code === 'KeyQ') switchW();
   if (e.code === 'KeyR' && P.role === 'hider' && P.form.k === 'f') P.frot += Math.PI / 4;
   if (/^Digit[1-9]$/.test(e.code)) { const b = document.querySelectorAll('#phForms [data-fm]')[+e.code.slice(5) - 1]; if (b && P.role === 'hider') chooseForm(b.dataset.fm); if (P.role === 'seeker') { P.weapon = e.code === 'Digit2' ? 'knife' : 'gun'; updateHud(); } }
@@ -533,8 +570,10 @@ addEventListener('keydown', e => {
 export function canMove() { return S.mode === 'prop' && !(P.role === 'seeker' && P.phase === 'hide') && P.form.k !== 'wall' && !$('#dialog').classList.contains('show'); }
 const camBack = new THREE.Vector3();
 export function updateProp(dt) {
-  for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.t -= dt; s.m.material.opacity = s.t / (s.T || .3); if (s.v) { s.v.y -= 6 * dt; s.m.position.addScaledVector(s.v, dt); } if (s.t <= 0) { scene.remove(s.m); sparks.splice(i, 1); } }
+  for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.t -= dt; s.m.material.opacity = s.t / (s.T || .3); if (s.v) { if (s.drag) s.v.multiplyScalar(Math.max(0, 1 - dt * 2.2)); else s.v.y -= 6 * dt; s.m.position.addScaledVector(s.v, dt); } if (s.grow) s.m.scale.multiplyScalar(1 + s.grow * dt); if (s.t <= 0) { scene.remove(s.m); sparks.splice(i, 1); } }
   if (S.mode !== 'prop') return;
+  if (P.blindT > 0) P.blindT = Math.max(0, P.blindT - dt);
+  { const f = $('#phFog'); if (f) { const a = clamp(P.blindT / SPRAY_T * 1.4, 0, 1); f.style.opacity = a; f.style.backdropFilter = f.style.webkitBackdropFilter = `blur(${(a * 14).toFixed(1)}px)`; } }
   if (P.holding && P.role === 'seeker') fire();
   // 💨 boost: run faster for a few seconds
   if (P.base) { if (P.boostT > 0) P.boostT = Math.max(0, P.boostT - dt); const m = P.boostT > 0 ? BOOST_X : 1; player.speed = P.base.speed * m; player.run = P.base.run * m; }
@@ -556,7 +595,7 @@ export function updateProp(dt) {
     if (pl.id === P.myId) continue; const s = P.states[pl.id]; if (!s) continue;
     let r = P.remotes[pl.id];
     if (!r) { r = P.remotes[pl.id] = { id: pl.id, g: new THREE.Group(), fk: null, alive: true }; scene.add(r.g); r.g.position.set(s.x, s.y, s.z); r.tag = nameTag(pl.name, pl.color); r.g.add(r.tag); }
-    if (r.fk !== s.f) { if (r.mesh) r.g.remove(r.mesh); r.fk = s.f; r.mesh = formMesh(parseForm(s.f), pl.color, pl.id === P.seeker); r.mesh.traverse(o => o.userData.rid = pl.id); r.g.add(r.mesh); }
+    if (r.fk !== s.f) { if (r.mesh) r.g.remove(r.mesh); r.fk = s.f; r.mesh = formMesh(parseForm(s.f), pl.color, pl.id === P.seeker); if (pl.id !== P.seeker) addHitbox(r.mesh); r.mesh.traverse(o => o.userData.rid = pl.id); r.g.add(r.mesh); }
     r.alive = !P.caught.has(pl.id); r.g.visible = r.alive || pl.id === P.seeker;
     if (s.w) { r.g.position.set(s.w[0], s.w[1], s.w[2]); r.mesh.rotation.y = s.w[3]; }
     else { r.g.position.lerp(V2.set(s.x, s.y, s.z), k); r.mesh.rotation.y = s.yaw + (s.f.startsWith('f|') ? s.fr : 0); }

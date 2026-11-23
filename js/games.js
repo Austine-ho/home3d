@@ -1,7 +1,7 @@
 // three games: 清潔大作戰 (pests), 驅鬼大師 (ghosts), 拆家狂人 (destruction)
 import { THREE, S, $, scene, camera, M, bx, cy, sp, toast, clamp, DEG, isTouch, shade } from './core.js';
 import { H, hits, groundAt, floorOf, FH, damageAt, lightCfg, setNight, hemi, amb, setLamp, floorY, build, destructionProgress, killBlock, entFi, allFl, zoneOf } from './house.js';
-import { player, input, fx, on } from './controls.js';
+import { player, input, fx, on, releaseLock } from './controls.js';
 
 // ================= audio (synthesised) =================
 export const Snd = {
@@ -676,7 +676,7 @@ function renderWeaponBar() {
   $('#tbtns [data-act=attack]').textContent = W().icon;
 }
 export function openShop(betweenLevels, fromDeath) {
-  G.paused = true; holding = false; beam.visible = false;
+  releaseLock(); G.paused = true; holding = false; beam.visible = false;
   const p = G.prof, list = Object.entries(WEAPONS).filter(([id, w]) => G.kind === 'adventure' ? (w.g !== 'destroy' || ['katana', 'grenade', 'cannon', 'rocket'].includes(id)) : w.g === G.kind);
   let h = `<h2>🛒 ${G.kind === 'clean' ? '清潔用品店' : G.kind === 'ghost' ? '廟口法器店' : G.kind === 'adventure' ? '冒險者商店' : '五金武器行'}</h2><div class="money">💰 $${p.money}</div><div class="items">`;
   for (const [id, w] of list) {
@@ -694,7 +694,7 @@ export function openShop(betweenLevels, fromDeath) {
       <div class="item"><div class="ic">💚</div><div class="info"><b>回血 Lv${p.regLv}</b><small>戰鬥中也會慢慢回血，脫離戰鬥回更快</small></div>${p.regLv < 6 ? `<button data-reg>$${rc}</button>` : '<button disabled>滿級</button>'}</div>
       <div class="item"><div class="ic">👟</div><div class="info"><b>移動速度 +8%</b><small>Lv${p.spdLv}</small></div>${p.spdLv < 6 ? `<button data-spd>$${sc}</button>` : '<button disabled>滿級</button>'}</div></div>`;
   }
-  h += `<div class="rowb">${betweenLevels ? `<button class="go" data-next>▶ 第 ${G.prof.level} 關</button>` : fromDeath ? `<button class="go" data-retry>🔁 重新挑戰</button>` : `<button class="go" data-close>▶ 繼續</button>`}</div>`;
+  h += `<div class="rowb">${betweenLevels ? `<button class="go" data-next>▶ 第 ${G.prof.level} 關</button>` : fromDeath ? `<button class="go" data-retry>🔁 重新挑戰</button>` : `<button class="go" data-close>▶ 繼續</button>`}<button data-menu>🏠 回主選單</button></div>`;
   const el = $('#shop'); el.innerHTML = `<div class="card">${h}</div>`; el.classList.add('show');
   const reopen = () => openShop(betweenLevels, fromDeath);
   el.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => { const id = b.dataset.buy, w = WEAPONS[id]; if (p.money < w.price) return toast('錢不夠喔'); p.money -= w.price; p.owned[id] = 0; p.cur = id; Snd.buy(); buildVM(id); renderWeaponBar(); saveProf(); reopen(); });
@@ -710,9 +710,10 @@ export function openShop(betweenLevels, fromDeath) {
   const nx = el.querySelector('[data-next]'); if (nx) nx.onclick = () => { close(); startLevel(G.prof.level); };
   const rt = el.querySelector('[data-retry]'); if (rt) rt.onclick = () => { close(); startLevel(G.level); };
   const cl = el.querySelector('[data-close]'); if (cl) cl.onclick = close;
+  el.querySelector('[data-menu]').onclick = () => { el.classList.remove('show'); G.paused = false; on.escape && on.escape('menu'); };
 }
 function showDialog(title, text, btns) {
-  const el = $('#dialog'); el.innerHTML = `<div class="card"><h2>${title}</h2><p>${text}</p><div class="rowb">${btns.map((b, i) => `<button data-i="${i}" class="${i === 0 ? 'go' : ''}">${b[0]}</button>`).join('')}</div></div>`;
+  releaseLock(); const el = $('#dialog'); el.innerHTML = `<div class="card"><h2>${title}</h2><p>${text}</p><div class="rowb">${btns.map((b, i) => `<button data-i="${i}" class="${i === 0 ? 'go' : ''}">${b[0]}</button>`).join('')}</div></div>`;
   el.classList.add('show'); el.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { el.classList.remove('show'); btns[+b.dataset.i][1](); });
 }
 let bannerT;
@@ -815,7 +816,9 @@ function horrorEvents(dt, L, zone) {
 // ================= pause: continue / save / restart / help / back home =================
 const HELP = {"clean": ["🪳 清潔大作戰", "家裡冒出蟑螂、蚊子和老鼠，用掃把、水槍、殺蟲劑把牠們全部消滅。每關清完會進商店，用賺到的錢買武器和升級。關卡越後面數量越多，還會出現異常巨大的蟲、停電和大量湧出，最後要打倒蟑螂王。"], "ghost": ["👻 驅鬼大師", "家裡鬧鬼了！用艾草棒、聖水槍、符咒把鬼魂趕走。紅色箭頭會指出最近的鬼在哪（樓上／樓下）。越後面鬼越多、越兇，還有殭屍、巨大的鬼和突然衝到眼前的臉，最後對決鬼王。"], "destroy": ["🔨 拆家狂人", "用鐵鎚、武士刀、手榴彈、大砲把整個家拆掉，拆越多賺越多，可以按 B 開商店買更強的武器。全部拆光有全毀獎金，之後可以把房子復原再拆一次（只影響遊戲，不會改到你的設計）。"], "adventure": ["🗝 探險模式", "走進地下室、下水道和神秘傳送門，打開寶箱拿武器與道具，打倒怪物賺錢。後室越深層怪物越多、越大，還有「嚇人」怪會在你靠近時衝到眼前。倒下時錢和武器都會保留。"], "hide": ["👤 捉迷藏", "白色小人躲在家裡各處，身體會變成旁邊牆壁或家具的保護色。看仔細，用 🔫 射中就算找到（+6 秒），打空會扣 3 秒。📡 提示（H 鍵）每關 3 次，最近的小人會從那個方向傳來笑聲。第 3 關起你沒在看的小人會偷偷換位置。"]};
 export function openPause() {
-  if (!G.active || $('#shop').classList.contains('show') || $('#dialog').classList.contains('show')) return;
+  if (!G.active) return on.escape && on.escape('menu');
+  if ($('#dialog').classList.contains('show')) return releaseLock();
+  if ($('#shop').classList.contains('show')) { $('#shop').classList.remove('show'); G.paused = false; }
   G.paused = true; holding = false; beam.visible = false;
   const name = { clean: '🪳 清潔大作戰', ghost: '👻 驅鬼大師', destroy: '🔨 拆家狂人', adventure: '🗝 探險模式', hide: '👤 捉迷藏' }[G.kind];
   const info = G.kind === 'destroy' ? `💰 $${G.prof.money}` : G.kind === 'adventure' ? `💰 $${G.prof.money}` : `第 ${G.level} 關 · 💰 $${G.prof.money}`;
