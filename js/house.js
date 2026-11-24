@@ -24,7 +24,7 @@ export const amb = new THREE.AmbientLight('#ffffff', 0.35); scene.add(amb);
 export const sun = new THREE.DirectionalLight('#fff4e0', 1.6); sun.position.set(-6, 20, 14); scene.add(sun);
 const POOL = matchMedia('(pointer: coarse)').matches ? 4 : 6;
 const pool = []; for (let i = 0; i < POOL; i++) { const L = new THREE.PointLight('#fff1dc', 0, 0, 1.6); scene.add(L); pool.push(L); }
-export const lightCfg = { intensity: 8, flicker: 0, mult: 1, lockFog: false };
+export const lightCfg = { intensity: 8, flicker: 0, mult: 1, lockFog: false, steady: false };
 export function setNight(v) { S.night = v; applyEnv(true); }
 
 // ---------- environment (season / brightness / colour), set by the admin ----------
@@ -41,11 +41,13 @@ export function envFor(fi) { const d = S.data || dataRef, z = zoneOf(fi, d); ret
 export function applyEnv(force) {
   const d = dataRef; if (!d) return;
   const fi = floorOf(camera.position.y - 1.5), e = envFor(fi), z = e.zone;
-  const k = JSON.stringify(e) + S.night + lightCfg.lockFog; if (!force && k === envKey) return; envKey = k;
+  const k = JSON.stringify(e) + S.night + lightCfg.lockFog + lightCfg.steady; if (!force && k === envKey) return; envKey = k;
   const se = SEASON[e.season] || SEASON.none, b = +e.bright || 1; curSeason = se; underground = !!z;
   scene.background.set(z ? (e.sky || '#050505') : S.night ? '#0b1020' : (e.sky || se.sky));
   hemi.color.set(e.tint); hemi.intensity = (S.night ? .1 : z ? .5 : 1.0) * b; amb.color.set(e.tint); amb.intensity = (S.night ? .04 : .35) * b;
   sun.intensity = (S.night || z ? 0 : 1.6 * (se.sunI || 1)) * b; sun.color.set(se.sun);
+  // steady mode (prop hunt): no lights following the camera, just even, bright light everywhere that never changes
+  if (lightCfg.steady) { hemi.intensity = (z ? 1.4 : 1.65) * b; amb.intensity = (z ? 1 : 1) * b; }
   for (const L of pool) L.color.set(e.lamp); lightCfg.mult = b;
   extMat.ground.color.set(se.ground);
   if (!lightCfg.lockFog) scene.fog = +e.fog > 0 ? new THREE.FogExp2(scene.background.clone(), +e.fog) : null;
@@ -596,8 +598,8 @@ export function updateHouse(dt, t) {
   const fk = Math.min(1, dt * 6);
   for (const L of pool) {
     if (L.userData.lamp && !L.userData.lamp.on) L.userData.lamp = null;
-    const tgt = L.userData.lamp ? full : 0, b0 = L.userData.base ?? 0;
-    L.userData.base = b0 + (tgt - b0) * (tgt < b0 ? Math.min(1, dt * 10) : fk);
+    const tgt = L.userData.lamp && !lightCfg.steady ? full : 0, b0 = L.userData.base ?? 0;
+    L.userData.base = lightCfg.steady ? 0 : b0 + (tgt - b0) * (tgt < b0 ? Math.min(1, dt * 10) : fk);
     L.intensity = L.userData.base * (lightCfg.flicker > 0 && Math.random() < lightCfg.flicker ? .05 : 1);
   }
   for (const p of H.portals) if (p.spin) { p.spin.rotation.z += dt * 2.5; p.spin.material.emissiveIntensity = 1.2 + Math.sin(t * 4) * .4; }

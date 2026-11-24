@@ -192,7 +192,7 @@ function startRound(m) {
   closeLobby(); $('#dialog').classList.remove('show');
   if (!P.ownData) P.ownData = S.data;
   S.data = JSON.parse(JSON.stringify(m.data)); build(S.data);
-  lightCfg.flicker = 0; lightCfg.intensity = 8; H.lamps.forEach(l => setLamp(l, true)); // prop hunt: every light stays on
+  lightCfg.flicker = 0; lightCfg.intensity = 8; lightCfg.steady = true; H.lamps.forEach(l => setLamp(l, true)); // prop hunt: every light stays on
   P.players = m.players; P.seeker = m.seeker; P.caught = new Set(); P.states = {};
   P.role = m.seeker === P.myId ? 'seeker' : 'hider';
   DASHES = m.dashes || 3; P.hp = 100; P.dash = DASHES; P.spray = 1; P.blindT = 0; P.boostT = 0; P.cat = '常用'; P.slot = 'me'; P.form = { k: 'me' }; P.frot = 0; P.weapon = 'gun'; P.cd = 0; P.tauntT = TAUNT_EVERY;
@@ -209,6 +209,7 @@ function startRound(m) {
   Snd.init(); Snd.bell();
 }
 export function stopRound() {
+  lightCfg.steady = false;
   setLock(false);
   P.holding = false;
   for (const id in P.remotes) scene.remove(P.remotes[id].g); P.remotes = {};
